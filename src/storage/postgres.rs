@@ -425,6 +425,10 @@ pub fn db_to_asset_type(type_str: &str, asset_index: Option<i16>) -> eyre::Resul
     }
 }
 
+/// Type conversion round-trips for PostgreSQL storage:
+/// - TxType ↔ SMALLINT (Legacy=0, Eip2930=1, Eip1559=2)
+/// - AssetType ↔ (TEXT, Option<SMALLINT>)
+/// - U256 → BigDecimal (including U256::MAX, lossless)
 #[cfg(test)]
 mod tests {
     use super::*;

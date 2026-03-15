@@ -41,6 +41,8 @@ pub fn decompress_raw(compressed: &[u8]) -> Result<Vec<u8>> {
     Ok(decompressed)
 }
 
+/// Codec error handling: LZ4 decompression and MessagePack deserialization
+/// fail gracefully on empty, garbage, and malformed input.
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -111,6 +111,8 @@ fn format_duration(secs: f64) -> String {
     }
 }
 
+/// Progress tracker: atomic counter increments and duration formatting
+/// (seconds, minutes, zero edge case).
 #[cfg(test)]
 mod tests {
     use super::*;

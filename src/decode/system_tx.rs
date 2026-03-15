@@ -133,6 +133,11 @@ fn decode_transfer_input(input: &[u8]) -> eyre::Result<(Address, U256)> {
     Ok((recipient, amount))
 }
 
+/// System transaction identification and ABI decoding:
+/// - NativeHype detection (empty input, value > 0, from 0x2222...)
+/// - SpotToken detection (0xa9059cbb selector, ABI decode recipient + amount)
+/// - Spot asset index extraction from 0x2000... address pattern
+/// - Short/malformed input handling
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -132,6 +132,8 @@ pub fn block_to_s3_key(block_number: u64) -> String {
     format!("{million}/{thousand}/{block_number}.rmp.lz4")
 }
 
+/// S3 key computation: verifies the `{million}/{thousand}/{block}.rmp.lz4` path
+/// pattern for block numbers at key boundaries (0, 1, 1000, 1001, 1M+1).
 #[cfg(test)]
 mod tests {
     use super::*;

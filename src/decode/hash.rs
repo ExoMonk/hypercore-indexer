@@ -350,6 +350,11 @@ fn encode_length_bytes(len: usize) -> Vec<u8> {
     bytes[start..].to_vec()
 }
 
+/// RLP encoding correctness and transaction hash computation:
+/// - RLP primitives (u64, u128, U256, address, bytes) encode per Ethereum spec
+/// - Legacy signed tx hash produces valid keccak256
+/// - System tx dual hashes diverge (official != explorer)
+/// - Chain ID changes produce different hashes
 #[cfg(test)]
 mod tests {
     use super::*;

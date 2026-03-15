@@ -162,6 +162,11 @@ fn expand_env_vars(input: &str) -> String {
     result
 }
 
+/// Config loading and env var expansion:
+/// - Default config values (mainnet, 64 workers, batch 100)
+/// - TOML parsing: minimal, full, missing file
+/// - `${VAR}` and `$VAR` expansion from environment
+/// - DATABASE_URL priority: CLI > env > config
 #[cfg(test)]
 mod tests {
     use super::*;

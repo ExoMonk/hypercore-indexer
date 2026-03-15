@@ -678,12 +678,16 @@ where
     deserializer.deserialize_any(TxTypeVisitor)
 }
 
+/// Wire format deserializer correctness:
+/// - u64/u128 from big-endian bytes and native msgpack ints
+/// - Option<u64> from null, int, and missing fields
+/// - v parity from bool/int/bytes
+/// - tx_type from string ("Legacy") and integer (0, 2)
+/// - WireTxEnum accessors (to, value, nonce, input, gas_limit, tx_type_name)
+/// - Network config: bucket names, chain IDs, FromStr parsing
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // --- Custom deserializer unit tests ---
-    // These test the serde visitors directly via MessagePack round-trips.
 
     #[test]
     fn u64_from_8_byte_be() {

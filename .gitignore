@@ -3,5 +3,10 @@ tasks
 specs
 
 .env
+.env.*
+hypercore.toml
+*.db
+*.db-wal
+*.db-shm
 .claude
 CLAUDE.md

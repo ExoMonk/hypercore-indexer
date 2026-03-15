@@ -229,6 +229,10 @@ pub fn write_cursor(path: &Path, block_number: u64) -> Result<()> {
     Ok(())
 }
 
+/// Range configuration validation and cursor file operations:
+/// - Config rejects invalid ranges (start > end), zero workers, zero channel
+/// - Cursor file: write/read round-trip, nested dir creation, atomic rename
+/// - Effective start: from config, from cursor, cursor past end
 #[cfg(test)]
 mod tests {
     use super::*;
