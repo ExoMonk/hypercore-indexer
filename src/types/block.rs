@@ -153,6 +153,14 @@ impl WireTxEnum {
         }
     }
 
+    pub fn gas_limit(&self) -> u64 {
+        match self {
+            WireTxEnum::Legacy(tx) => tx.gas_limit,
+            WireTxEnum::Eip2930(tx) => tx.gas_limit,
+            WireTxEnum::Eip1559(tx) => tx.gas_limit,
+        }
+    }
+
     pub fn tx_type_name(&self) -> &'static str {
         match self {
             WireTxEnum::Legacy(_) => "Legacy",

@@ -1,7 +1,7 @@
 use crate::error::Result;
 use aws_sdk_s3::Client;
 use std::fmt;
-use tracing::info;
+use tracing::{debug, info};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum Network {
@@ -88,7 +88,7 @@ impl HyperEvmS3Client {
     /// Fetch raw compressed block data from S3.
     pub async fn fetch_block_raw(&self, block_number: u64) -> Result<Vec<u8>> {
         let key = block_to_s3_key(block_number);
-        info!(block_number, key = %key, "Fetching block from S3");
+        debug!(block_number, key = %key, "Fetching block from S3");
 
         let resp = self
             .client
@@ -107,7 +107,7 @@ impl HyperEvmS3Client {
             .map_err(|e| eyre::eyre!("Failed to read S3 response body: {e}"))?;
 
         let data = bytes.to_vec();
-        info!(
+        debug!(
             block_number,
             compressed_size = data.len(),
             "Fetched block data from S3"

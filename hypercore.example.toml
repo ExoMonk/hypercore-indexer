@@ -1,0 +1,19 @@
+# Hypercore Indexer Configuration
+# Copy to hypercore.toml and customize.
+# CLI flags and environment variables override these values.
+
+[network]
+name = "mainnet"              # "mainnet" (chain 999) or "testnet" (chain 998, HIP4)
+region = "ap-northeast-1"     # AWS region for S3 bucket
+
+[storage]
+# backend = "postgres"        # "postgres" or "sqlite" (auto-detected from url)
+# url = "postgres://postgres:postgres@localhost:5432/hypercore"
+# url = "sqlite:./hypercore.db"
+batch_size = 100               # blocks buffered before flushing to DB
+
+[pipeline]
+workers = 64                   # concurrent S3 fetch workers
+channel_size = 1024            # bounded channel capacity (backpressure)
+retry_attempts = 3             # max retries per failed S3 fetch
+retry_delay_ms = 1000          # base retry delay (exponential backoff)

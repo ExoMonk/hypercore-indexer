@@ -22,6 +22,7 @@ hex = "0.4"
 # reth-ethereum-primitives = { git = "https://github.com/hl-archive-node/reth", rev = "416c2e26756f1c8ee86e6b8e4081f434952b3a1a" }
 
 alloy-primitives = { version = "1.3", features = ["serde"] }
+tiny-keccak = { version = "2", features = ["keccak"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

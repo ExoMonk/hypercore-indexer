@@ -1,0 +1,28 @@
+pub mod clickhouse;
+pub mod postgres;
+pub mod sqlite;
+
+use crate::decode::types::DecodedBlock;
+
+#[async_trait::async_trait]
+pub trait Storage: Send + Sync {
+    /// Insert a single decoded block with all its transactions, system transfers, and logs.
+    async fn insert_block(&self, block: &DecodedBlock) -> eyre::Result<()>;
+
+    /// Insert a batch of decoded blocks in a single transaction.
+    async fn insert_batch(&self, blocks: &[DecodedBlock]) -> eyre::Result<()>;
+
+    /// Insert a batch of decoded blocks and update the cursor atomically in one transaction.
+    async fn insert_batch_and_set_cursor(
+        &self,
+        blocks: &[DecodedBlock],
+        network: &str,
+        block_number: u64,
+    ) -> eyre::Result<()>;
+
+    /// Get the last indexed block number for a network.
+    async fn get_cursor(&self, network: &str) -> eyre::Result<Option<u64>>;
+
+    /// Set the cursor for a network.
+    async fn set_cursor(&self, network: &str, block_number: u64) -> eyre::Result<()>;
+}
