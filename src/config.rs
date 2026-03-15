@@ -10,6 +10,8 @@ pub struct Config {
     pub storage: StorageConfig,
     #[serde(default)]
     pub pipeline: PipelineConfig,
+    #[serde(default)]
+    pub live: LiveConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +83,53 @@ impl Default for PipelineConfig {
             retry_delay_ms: default_retry_delay_ms(),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LiveConfig {
+    /// Base poll interval in ms (default: 1000, matching ~1s block time)
+    #[serde(default = "default_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    /// Minimum poll interval floor in ms (default: 200)
+    #[serde(default = "default_min_poll_interval_ms")]
+    pub min_poll_interval_ms: u64,
+    /// Decay factor for adaptive backoff (default: 0.67)
+    #[serde(default = "default_poll_decay")]
+    pub poll_decay: f64,
+    /// Blocks behind tip before triggering parallel backfill (default: 100)
+    #[serde(default = "default_gap_threshold")]
+    pub gap_threshold: u64,
+    /// Concurrent workers for gap backfill (default: 64)
+    #[serde(default = "default_backfill_workers")]
+    pub backfill_workers: usize,
+}
+
+impl Default for LiveConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: default_poll_interval_ms(),
+            min_poll_interval_ms: default_min_poll_interval_ms(),
+            poll_decay: default_poll_decay(),
+            gap_threshold: default_gap_threshold(),
+            backfill_workers: default_backfill_workers(),
+        }
+    }
+}
+
+fn default_poll_interval_ms() -> u64 {
+    1000
+}
+fn default_min_poll_interval_ms() -> u64 {
+    200
+}
+fn default_poll_decay() -> f64 {
+    0.67
+}
+fn default_gap_threshold() -> u64 {
+    100
+}
+fn default_backfill_workers() -> usize {
+    64
 }
 
 fn default_network() -> String {
@@ -296,5 +345,53 @@ retry_delay_ms = 2000
     fn missing_file_returns_default() {
         let config = Config::load(Path::new("/nonexistent/config.toml")).unwrap();
         assert_eq!(config.network.name, "mainnet");
+    }
+
+    #[test]
+    fn live_config_defaults() {
+        let config = LiveConfig::default();
+        assert_eq!(config.poll_interval_ms, 1000);
+        assert_eq!(config.min_poll_interval_ms, 200);
+        assert!((config.poll_decay - 0.67).abs() < f64::EPSILON);
+        assert_eq!(config.gap_threshold, 100);
+        assert_eq!(config.backfill_workers, 64);
+    }
+
+    #[test]
+    fn parse_toml_with_live_section() {
+        let toml = r#"
+[network]
+name = "testnet"
+
+[live]
+poll_interval_ms = 500
+min_poll_interval_ms = 100
+poll_decay = 0.5
+gap_threshold = 200
+backfill_workers = 32
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.live.poll_interval_ms, 500);
+        assert_eq!(config.live.min_poll_interval_ms, 100);
+        assert!((config.live.poll_decay - 0.5).abs() < f64::EPSILON);
+        assert_eq!(config.live.gap_threshold, 200);
+        assert_eq!(config.live.backfill_workers, 32);
+    }
+
+    #[test]
+    fn parse_toml_without_live_section_uses_defaults() {
+        let toml = r#"
+[network]
+name = "mainnet"
+
+[storage]
+url = "sqlite:./data.db"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.live.poll_interval_ms, 1000);
+        assert_eq!(config.live.min_poll_interval_ms, 200);
+        assert!((config.live.poll_decay - 0.67).abs() < f64::EPSILON);
+        assert_eq!(config.live.gap_threshold, 100);
+        assert_eq!(config.live.backfill_workers, 64);
     }
 }

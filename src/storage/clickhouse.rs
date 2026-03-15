@@ -362,6 +362,10 @@ impl Storage for ClickHouseStorage {
         Ok(())
     }
 
+    /// NOTE: ClickHouse has no multi-table transactions. Data and cursor are written
+    /// as separate operations. If the process crashes after `insert_batch` but before
+    /// `set_cursor`, blocks will be re-processed on restart (at-least-once semantics).
+    /// ReplacingMergeTree deduplicates these on merge, so no data is lost or corrupted.
     async fn insert_batch_and_set_cursor(
         &self,
         blocks: &[DecodedBlock],

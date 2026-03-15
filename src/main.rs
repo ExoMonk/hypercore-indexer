@@ -6,6 +6,7 @@ use tracing::info;
 mod config;
 mod decode;
 mod error;
+mod live;
 mod pipeline;
 mod s3;
 mod storage;
@@ -103,6 +104,25 @@ enum Commands {
         #[arg(long, default_value = "100")]
         batch_size: usize,
     },
+
+    /// Follow the chain tip, continuously indexing new blocks from S3
+    Live {
+        /// Start block (if omitted, resumes from DB cursor)
+        #[arg(long)]
+        from: Option<u64>,
+
+        /// Base poll interval in ms (overrides config)
+        #[arg(long)]
+        poll_interval: Option<u64>,
+
+        /// Gap threshold for parallel backfill (overrides config)
+        #[arg(long)]
+        gap_threshold: Option<u64>,
+
+        /// Database URL (overrides config)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -166,6 +186,13 @@ workers = 64
 channel_size = 1024
 retry_attempts = 3
 retry_delay_ms = 1000
+
+[live]
+poll_interval_ms = 1000
+min_poll_interval_ms = 200
+poll_decay = 0.67
+gap_threshold = 100
+backfill_workers = 64
 "#
             );
 
@@ -346,23 +373,40 @@ retry_delay_ms = 1000
             let mut count = 0u64;
 
             if let Some(store) = db_storage {
-                // Storage mode: decode, buffer, and batch insert
+                // Storage mode: decode, buffer, and batch insert.
+                // Track contiguous frontier to avoid advancing cursor past gaps
+                // when parallel workers skip blocks after exhausting retries.
+                use std::collections::BTreeSet;
+
                 let mut buffer: Vec<decode::types::DecodedBlock> =
                     Vec::with_capacity(effective_batch_size);
+                let mut contiguous_cursor = start_block.saturating_sub(1);
+                let mut pending: BTreeSet<u64> = BTreeSet::new();
 
                 while let Some((_block_num, raw_block)) = rx.recv().await {
                     let decoded = decode::decode_block(&raw_block, chain_id)?;
+                    let block_num = decoded.number;
                     buffer.push(decoded);
                     count += 1;
 
+                    // Track contiguous frontier
+                    pending.insert(block_num);
+                    while pending.first().copied() == Some(contiguous_cursor + 1) {
+                        contiguous_cursor += 1;
+                        pending.pop_first();
+                    }
+
                     if buffer.len() >= effective_batch_size {
-                        let max_block = buffer.iter().map(|b| b.number).max().unwrap();
                         store
-                            .insert_batch_and_set_cursor(&buffer, &network_name, max_block)
+                            .insert_batch_and_set_cursor(
+                                &buffer,
+                                &network_name,
+                                contiguous_cursor,
+                            )
                             .await?;
                         info!(
                             batch_blocks = buffer.len(),
-                            cursor = max_block,
+                            cursor = contiguous_cursor,
                             total_received = count,
                             "Flushed batch to storage"
                         );
@@ -372,13 +416,12 @@ retry_delay_ms = 1000
 
                 // Flush remaining blocks
                 if !buffer.is_empty() {
-                    let max_block = buffer.iter().map(|b| b.number).max().unwrap();
                     store
-                        .insert_batch_and_set_cursor(&buffer, &network_name, max_block)
+                        .insert_batch_and_set_cursor(&buffer, &network_name, contiguous_cursor)
                         .await?;
                     info!(
                         batch_blocks = buffer.len(),
-                        cursor = max_block,
+                        cursor = contiguous_cursor,
                         "Flushed final batch to storage"
                     );
                 }
@@ -393,6 +436,76 @@ retry_delay_ms = 1000
             }
 
             info!(total_received = count, "Backfill complete");
+        }
+
+        Commands::Live {
+            from,
+            poll_interval,
+            gap_threshold,
+            database_url,
+        } => {
+            let client = HyperEvmS3Client::new(region, network).await?;
+            let client = Arc::new(client);
+            let chain_id = network.chain_id();
+            let network_name = network.to_string();
+
+            // Resolve database URL: CLI flag > env var > config file
+            let effective_db_url = cfg.database_url(database_url.as_deref());
+            let db_url = effective_db_url.ok_or_else(|| {
+                eyre::eyre!(
+                    "Live mode requires a database. Specify --database-url, set DATABASE_URL env, \
+                     or add [storage].url to your config file."
+                )
+            })?;
+
+            // Connect to storage backend (same detection as Backfill)
+            let db_storage: Box<dyn storage::Storage> = if db_url.starts_with("sqlite:") {
+                let sqlite = storage::sqlite::SqliteStorage::connect(&db_url).await?;
+                sqlite.ensure_schema().await?;
+                Box::new(sqlite)
+            } else if db_url.starts_with("http://") || db_url.starts_with("https://") {
+                let ch = storage::clickhouse::ClickHouseStorage::connect(&db_url).await?;
+                ch.ensure_schema().await?;
+                Box::new(ch)
+            } else {
+                let pg = storage::postgres::PostgresStorage::connect(&db_url).await?;
+                pg.ensure_schema().await?;
+                Box::new(pg)
+            };
+
+            // Apply CLI overrides to live config
+            let mut live_config = cfg.live;
+            if let Some(pi) = poll_interval {
+                live_config.poll_interval_ms = pi;
+            }
+            if let Some(gt) = gap_threshold {
+                live_config.gap_threshold = gt;
+            }
+
+            if let Some(start_block) = from {
+                live::run_live_from(
+                    client,
+                    db_storage,
+                    &live_config,
+                    &cfg.pipeline,
+                    &cfg.storage,
+                    chain_id,
+                    &network_name,
+                    start_block,
+                )
+                .await?;
+            } else {
+                live::run_live(
+                    client,
+                    db_storage,
+                    &live_config,
+                    &cfg.pipeline,
+                    &cfg.storage,
+                    chain_id,
+                    &network_name,
+                )
+                .await?;
+            }
         }
     }
 
