@@ -8,6 +8,12 @@ use hypercore_indexer::s3::codec;
 use hypercore_indexer::storage::sqlite::SqliteStorage;
 use hypercore_indexer::storage::Storage;
 
+/// Block row: (block_number, block_hash, parent_hash, timestamp, gas_used, gas_limit, base_fee_per_gas, tx_count, system_tx_count)
+type BlockRow = (i64, Vec<u8>, Vec<u8>, i64, i64, i64, Option<i64>, i32, i32);
+
+/// Event log rows: Vec<(block_number, tx_index, log_index, address, topic0, data)>
+type EventLogRows = Vec<(i64, i32, i32, Vec<u8>, Option<Vec<u8>>, Vec<u8>)>;
+
 fn load_fixture(name: &str) -> Vec<u8> {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read(&path).unwrap_or_else(|e| panic!("Failed to read fixture {path}: {e}"))
@@ -36,7 +42,7 @@ async fn insert_and_query_block() {
 
     db.insert_block(&block).await.unwrap();
 
-    let row: (i64, Vec<u8>, Vec<u8>, i64, i64, i64, Option<i64>, i32, i32) = sqlx::query_as(
+    let row: BlockRow = sqlx::query_as(
         "SELECT block_number, block_hash, parent_hash, timestamp, gas_used, gas_limit, base_fee_per_gas, tx_count, system_tx_count FROM blocks WHERE block_number = ?",
     )
     .bind(5_000_038i64)
@@ -168,7 +174,7 @@ async fn insert_and_query_event_logs() {
     let transfer_topic = block.transactions[0].logs[0].topics[0];
     let first_log = &block.transactions[0].logs[0];
 
-    let rows: Vec<(i64, i32, i32, Vec<u8>, Option<Vec<u8>>, Vec<u8>)> = sqlx::query_as(
+    let rows: EventLogRows = sqlx::query_as(
         "SELECT block_number, tx_index, log_index, address, topic0, data FROM event_logs WHERE topic0 = ? AND block_number = ? ORDER BY log_index",
     )
     .bind(transfer_topic.as_slice())

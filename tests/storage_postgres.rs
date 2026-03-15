@@ -13,6 +13,12 @@ use hypercore_indexer::s3::codec;
 use hypercore_indexer::storage::postgres::PostgresStorage;
 use hypercore_indexer::storage::Storage;
 
+/// Block row: (block_number, block_hash, parent_hash, timestamp, gas_used, gas_limit, base_fee_per_gas, tx_count, system_tx_count)
+type BlockRow = (i64, Vec<u8>, Vec<u8>, i64, i64, i64, Option<i64>, i32, i32);
+
+/// Event log rows: Vec<(block_number, tx_index, log_index, address, topic0, data)>
+type EventLogRows = Vec<(i64, i32, i32, Vec<u8>, Option<Vec<u8>>, Vec<u8>)>;
+
 /// Uses port 5433 (test compose) to avoid conflicting with dev on 5432.
 /// Override with DATABASE_URL env var if needed.
 fn database_url() -> String {
@@ -59,7 +65,7 @@ async fn insert_and_query_block() {
 
     pg.insert_block(&block).await.unwrap();
 
-    let row: (i64, Vec<u8>, Vec<u8>, i64, i64, i64, Option<i64>, i32, i32) = sqlx::query_as(
+    let row: BlockRow = sqlx::query_as(
         "SELECT block_number, block_hash, parent_hash, timestamp, gas_used, gas_limit, base_fee_per_gas, tx_count, system_tx_count FROM blocks WHERE block_number = $1",
     )
     .bind(5_000_038i64)
@@ -181,7 +187,7 @@ async fn insert_and_query_event_logs() {
     // Transfer event signature: 0xddf252ad...
     let transfer_topic0 = block.transactions[0].logs[0].topics[0];
 
-    let rows: Vec<(i64, i32, i32, Vec<u8>, Option<Vec<u8>>, Vec<u8>)> = sqlx::query_as(
+    let rows: EventLogRows = sqlx::query_as(
         "SELECT block_number, tx_index, log_index, address, topic0, data FROM event_logs WHERE topic0 = $1 AND block_number = $2 ORDER BY log_index",
     )
     .bind(transfer_topic0.as_slice())

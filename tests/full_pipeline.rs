@@ -12,6 +12,12 @@ use hypercore_indexer::s3::codec;
 use hypercore_indexer::storage::sqlite::SqliteStorage;
 use hypercore_indexer::storage::Storage;
 
+/// Block row: (block_number, block_hash, parent_hash, timestamp, gas_used, gas_limit, base_fee_per_gas, tx_count, system_tx_count)
+type BlockRow = (i64, Vec<u8>, Vec<u8>, i64, i64, i64, Option<i64>, i32, i32);
+
+/// System transfer row: (official_hash, explorer_hash, system_address, asset_type, asset_index, recipient, amount_wei)
+type SystemTransferRow = (Vec<u8>, Vec<u8>, Vec<u8>, String, Option<i32>, Vec<u8>, String);
+
 fn load_fixture(name: &str) -> Vec<u8> {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read(&path).unwrap_or_else(|e| panic!("Failed to read fixture {path}: {e}"))
@@ -43,7 +49,7 @@ async fn pipeline_block_5000038_blocks_table() {
     db.insert_block(&decoded).await.unwrap();
 
     // Stage 4: Query back and verify exact values
-    let row: (i64, Vec<u8>, Vec<u8>, i64, i64, i64, Option<i64>, i32, i32) = sqlx::query_as(
+    let row: BlockRow = sqlx::query_as(
         "SELECT block_number, block_hash, parent_hash, timestamp, gas_used, gas_limit, base_fee_per_gas, tx_count, system_tx_count FROM blocks WHERE block_number = ?",
     )
     .bind(5_000_038i64)
@@ -127,7 +133,7 @@ async fn pipeline_block_5000038_system_transfer_dual_hashes() {
     let decoded = decode::decode_block(&raw, 999).unwrap();
     db.insert_block(&decoded).await.unwrap();
 
-    let row: (Vec<u8>, Vec<u8>, Vec<u8>, String, Option<i32>, Vec<u8>, String) = sqlx::query_as(
+    let row: SystemTransferRow = sqlx::query_as(
         "SELECT official_hash, explorer_hash, system_address, asset_type, asset_index, recipient, amount_wei FROM system_transfers WHERE block_number = ?",
     )
     .bind(5_000_038i64)
