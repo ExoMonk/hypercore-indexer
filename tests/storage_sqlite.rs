@@ -86,21 +86,20 @@ async fn insert_and_query_transactions() {
 
     // Query reverted tx (index 3)
     let tx3 = &block.transactions[3];
-    let row: (bool,) = sqlx::query_as(
-        "SELECT success FROM transactions WHERE tx_hash = ?",
-    )
-    .bind(tx3.hash.as_slice())
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    assert!(!row.0, "tx 3 should be reverted");
-
-    // Total tx count
-    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = ?")
-        .bind(5_000_038i64)
+    let row: (bool,) = sqlx::query_as("SELECT success FROM transactions WHERE tx_hash = ?")
+        .bind(tx3.hash.as_slice())
         .fetch_one(db.pool())
         .await
         .unwrap();
+    assert!(!row.0, "tx 3 should be reverted");
+
+    // Total tx count
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = ?")
+            .bind(5_000_038i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(count, 8);
 }
 
@@ -136,23 +135,21 @@ async fn insert_and_query_system_transfers() {
     assert_ne!(row.1, row.2, "official and explorer hashes must differ");
 
     // Query by official hash
-    let (bn,): (i64,) = sqlx::query_as(
-        "SELECT block_number FROM system_transfers WHERE official_hash = ?",
-    )
-    .bind(stx.official_hash.as_slice())
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (bn,): (i64,) =
+        sqlx::query_as("SELECT block_number FROM system_transfers WHERE official_hash = ?")
+            .bind(stx.official_hash.as_slice())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 5_000_038);
 
     // Query by explorer hash
-    let (bn,): (i64,) = sqlx::query_as(
-        "SELECT block_number FROM system_transfers WHERE explorer_hash = ?",
-    )
-    .bind(stx.explorer_hash.as_slice())
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (bn,): (i64,) =
+        sqlx::query_as("SELECT block_number FROM system_transfers WHERE explorer_hash = ?")
+            .bind(stx.explorer_hash.as_slice())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 5_000_038);
 }
 
@@ -238,11 +235,12 @@ async fn idempotent_insert() {
         .unwrap();
     assert_eq!(count, 1);
 
-    let (tx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = ?")
-        .bind(5_000_038i64)
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let (tx_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = ?")
+            .bind(5_000_038i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(tx_count, 8);
 }
 
@@ -260,12 +258,11 @@ async fn batch_insert() {
 
     db.insert_batch(&[block1, block2, block3]).await.unwrap();
 
-    let rows: Vec<(i64, i32)> = sqlx::query_as(
-        "SELECT block_number, tx_count FROM blocks ORDER BY block_number",
-    )
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
+    let rows: Vec<(i64, i32)> =
+        sqlx::query_as("SELECT block_number, tx_count FROM blocks ORDER BY block_number")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
 
     assert_eq!(rows.len(), 3);
     assert_eq!(rows[0], (1, 0));
@@ -318,13 +315,12 @@ async fn u256_amount_round_trip() {
 
     // System transfer amount should survive TEXT storage round-trip
     let stx = &block.system_transfers[0];
-    let (amount_str,): (String,) = sqlx::query_as(
-        "SELECT amount_wei FROM system_transfers WHERE block_number = ?",
-    )
-    .bind(5_000_038i64)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (amount_str,): (String,) =
+        sqlx::query_as("SELECT amount_wei FROM system_transfers WHERE block_number = ?")
+            .bind(5_000_038i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
 
     assert_eq!(amount_str, stx.amount_wei.to_string());
     assert!(!amount_str.is_empty());
@@ -342,24 +338,27 @@ async fn empty_block_insert() {
 
     db.insert_block(&block).await.unwrap();
 
-    let (tx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = ?")
-        .bind(1i64)
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let (tx_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = ?")
+            .bind(1i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(tx_count, 0);
 
-    let (log_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM event_logs WHERE block_number = ?")
-        .bind(1i64)
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let (log_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM event_logs WHERE block_number = ?")
+            .bind(1i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(log_count, 0);
 
-    let (stx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM system_transfers WHERE block_number = ?")
-        .bind(1i64)
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let (stx_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM system_transfers WHERE block_number = ?")
+            .bind(1i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(stx_count, 0);
 }

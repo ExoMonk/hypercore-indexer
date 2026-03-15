@@ -34,6 +34,8 @@ impl Default for NetworkConfig {
 #[derive(Debug, Deserialize)]
 pub struct StorageConfig {
     /// Storage backend: "postgres", "sqlite", or omitted for none.
+    /// Future use: config validation to reject unknown backends.
+    #[allow(dead_code)]
     pub backend: Option<String>,
     /// Database connection URL.
     /// PostgreSQL: "postgres://user:pass@host:port/db"
@@ -81,13 +83,27 @@ impl Default for PipelineConfig {
     }
 }
 
-fn default_network() -> String { "mainnet".to_string() }
-fn default_region() -> String { "ap-northeast-1".to_string() }
-fn default_batch_size() -> usize { 100 }
-fn default_workers() -> usize { 64 }
-fn default_channel_size() -> usize { 1024 }
-fn default_retry_attempts() -> u32 { 3 }
-fn default_retry_delay_ms() -> u64 { 1000 }
+fn default_network() -> String {
+    "mainnet".to_string()
+}
+fn default_region() -> String {
+    "ap-northeast-1".to_string()
+}
+fn default_batch_size() -> usize {
+    100
+}
+fn default_workers() -> usize {
+    64
+}
+fn default_channel_size() -> usize {
+    1024
+}
+fn default_retry_attempts() -> u32 {
+    3
+}
+fn default_retry_delay_ms() -> u64 {
+    1000
+}
 
 impl Config {
     /// Load config from a TOML file. Returns default config if file doesn't exist.
@@ -215,7 +231,10 @@ retry_delay_ms = 2000
         assert_eq!(config.network.name, "testnet");
         assert_eq!(config.network.region, "us-east-1");
         assert_eq!(config.storage.backend.as_deref(), Some("postgres"));
-        assert_eq!(config.storage.url.as_deref(), Some("postgres://user:pass@localhost:5432/hypercore"));
+        assert_eq!(
+            config.storage.url.as_deref(),
+            Some("postgres://user:pass@localhost:5432/hypercore")
+        );
         assert_eq!(config.storage.batch_size, 50);
         assert_eq!(config.pipeline.workers, 128);
         assert_eq!(config.pipeline.channel_size, 2048);

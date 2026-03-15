@@ -2,7 +2,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use tracing::info;
 
-use crate::decode::types::{AssetType, DecodedBlock, DecodedTx, TxType};
+use crate::decode::types::{AssetType, DecodedBlock, TxType};
 
 use super::Storage;
 
@@ -24,6 +24,7 @@ impl PostgresStorage {
     }
 
     /// Get a reference to the connection pool (for queries in tests, etc.).
+    #[allow(dead_code)]
     pub fn pool(&self) -> &PgPool {
         &self.pool
     }
@@ -393,6 +394,8 @@ pub fn tx_type_to_smallint(tx_type: TxType) -> i16 {
 }
 
 /// Convert SMALLINT back to TxType.
+/// Public API for consumers reading back from DB (M4+ query layer).
+#[allow(dead_code)]
 pub fn smallint_to_tx_type(val: i16) -> eyre::Result<TxType> {
     match val {
         0 => Ok(TxType::Legacy),
@@ -411,12 +414,13 @@ pub fn asset_type_to_db(asset_type: &AssetType) -> (&'static str, Option<i16>) {
 }
 
 /// Convert (TEXT, Option<SMALLINT>) back to AssetType.
+/// Public API for consumers reading back from DB (M4+ query layer).
+#[allow(dead_code)]
 pub fn db_to_asset_type(type_str: &str, asset_index: Option<i16>) -> eyre::Result<AssetType> {
     match type_str {
         "NativeHype" => Ok(AssetType::NativeHype),
         "SpotToken" => {
-            let idx = asset_index
-                .ok_or_else(|| eyre::eyre!("SpotToken requires asset_index"))?;
+            let idx = asset_index.ok_or_else(|| eyre::eyre!("SpotToken requires asset_index"))?;
             Ok(AssetType::SpotToken {
                 asset_index: idx as u16,
             })

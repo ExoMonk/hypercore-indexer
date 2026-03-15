@@ -5,6 +5,7 @@ pub mod sqlite;
 use crate::decode::types::DecodedBlock;
 
 #[async_trait::async_trait]
+#[allow(dead_code)]
 pub trait Storage: Send + Sync {
     /// Insert a single decoded block with all its transactions, system transfers, and logs.
     async fn insert_block(&self, block: &DecodedBlock) -> eyre::Result<()>;

@@ -88,7 +88,12 @@ async fn fetch_block_task(
     for attempt in 0..=retry_attempts {
         if attempt > 0 {
             let delay = retry_delay_ms * 2u64.pow(attempt - 1);
-            debug!(block_number, attempt, delay_ms = delay, "Retrying block fetch");
+            debug!(
+                block_number,
+                attempt,
+                delay_ms = delay,
+                "Retrying block fetch"
+            );
             tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
         }
 

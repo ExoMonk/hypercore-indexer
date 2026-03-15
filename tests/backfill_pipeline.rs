@@ -18,8 +18,7 @@ fn fixture_dir() -> String {
 /// Load and decode a block from the local fixture range, same as S3 would deliver.
 fn load_and_decode(block_number: u64) -> decode::types::DecodedBlock {
     let path = format!("{}/{block_number}.rmp.lz4", fixture_dir());
-    let compressed = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("Missing fixture {path}: {e}"));
+    let compressed = std::fs::read(&path).unwrap_or_else(|e| panic!("Missing fixture {path}: {e}"));
     let raw = codec::decode_block(&compressed).unwrap();
     decode::decode_block(&raw, 999).unwrap()
 }
@@ -27,7 +26,7 @@ fn load_and_decode(block_number: u64) -> decode::types::DecodedBlock {
 /// Load all 11 blocks in order, simulating a backfill range.
 fn load_all_blocks() -> Vec<decode::types::DecodedBlock> {
     (5_000_035..=5_000_045)
-        .map(|bn| load_and_decode(bn))
+        .map(load_and_decode)
         .collect()
 }
 
@@ -64,10 +63,24 @@ fn all_fixture_blocks_decode() {
 
     for (i, block) in blocks.iter().enumerate() {
         let (expected_bn, expected_txs, expected_stxs, expected_gas) = EXPECTED[i];
-        assert_eq!(block.number, expected_bn, "block number mismatch at index {i}");
-        assert_eq!(block.transactions.len(), expected_txs, "tx count mismatch for block {expected_bn}");
-        assert_eq!(block.system_transfers.len(), expected_stxs, "system_tx count mismatch for block {expected_bn}");
-        assert_eq!(block.gas_used, expected_gas, "gas_used mismatch for block {expected_bn}");
+        assert_eq!(
+            block.number, expected_bn,
+            "block number mismatch at index {i}"
+        );
+        assert_eq!(
+            block.transactions.len(),
+            expected_txs,
+            "tx count mismatch for block {expected_bn}"
+        );
+        assert_eq!(
+            block.system_transfers.len(),
+            expected_stxs,
+            "system_tx count mismatch for block {expected_bn}"
+        );
+        assert_eq!(
+            block.gas_used, expected_gas,
+            "gas_used mismatch for block {expected_bn}"
+        );
     }
 }
 
@@ -99,7 +112,10 @@ fn fixture_blocks_timestamps_are_monotonic() {
         assert!(
             w[1].timestamp >= w[0].timestamp,
             "timestamps should be monotonic: block {} ({}) < block {} ({})",
-            w[0].number, w[0].timestamp, w[1].number, w[1].timestamp
+            w[0].number,
+            w[0].timestamp,
+            w[1].number,
+            w[1].timestamp
         );
     }
 }
@@ -122,7 +138,11 @@ fn fixture_range_tx_hashes_are_all_unique() {
     let unique: std::collections::HashSet<_> = all_hashes.iter().collect();
     let total_txs: usize = EXPECTED.iter().map(|(_, txc, _, _)| txc).sum();
     assert_eq!(all_hashes.len(), total_txs);
-    assert_eq!(unique.len(), total_txs, "all tx hashes across range should be unique");
+    assert_eq!(
+        unique.len(),
+        total_txs,
+        "all tx hashes across range should be unique"
+    );
 }
 
 #[test]
@@ -164,9 +184,21 @@ async fn backfill_batch_insert_all_blocks() {
     for (i, row) in rows.iter().enumerate() {
         let (expected_bn, expected_txs, expected_stxs, expected_gas) = EXPECTED[i];
         assert_eq!(row.0, expected_bn as i64, "block_number mismatch at {i}");
-        assert_eq!(row.1, expected_txs as i32, "tx_count mismatch for block {}", expected_bn);
-        assert_eq!(row.2, expected_stxs as i32, "system_tx_count mismatch for block {}", expected_bn);
-        assert_eq!(row.3, expected_gas as i64, "gas_used mismatch for block {}", expected_bn);
+        assert_eq!(
+            row.1, expected_txs as i32,
+            "tx_count mismatch for block {}",
+            expected_bn
+        );
+        assert_eq!(
+            row.2, expected_stxs as i32,
+            "system_tx_count mismatch for block {}",
+            expected_bn
+        );
+        assert_eq!(
+            row.3, expected_gas as i64,
+            "gas_used mismatch for block {}",
+            expected_bn
+        );
     }
 }
 
@@ -180,11 +212,17 @@ async fn backfill_total_rows_correct() {
     let total_stxs: usize = EXPECTED.iter().map(|(_, _, stxc, _)| stxc).sum();
 
     let (tx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     let (stx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM system_transfers")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     let (log_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM event_logs")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
 
     assert_eq!(tx_count, total_txs as i64, "total transactions");
     assert_eq!(stx_count, total_stxs as i64, "total system transfers");
@@ -212,7 +250,9 @@ async fn backfill_with_cursor_tracks_progress() {
 
     // All 11 blocks stored
     let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blocks")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     assert_eq!(count, 11);
 }
 
@@ -226,12 +266,16 @@ async fn backfill_idempotent_reinsert() {
     db.insert_batch(&blocks).await.unwrap();
 
     let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blocks")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     assert_eq!(count, 11, "idempotent insert should not duplicate");
 
     let total_txs: usize = EXPECTED.iter().map(|(_, txc, _, _)| txc).sum();
     let (tx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     assert_eq!(tx_count, total_txs as i64, "tx count should not duplicate");
 }
 
@@ -269,13 +313,12 @@ async fn backfill_query_tx_by_hash() {
 
     // Pick a known tx hash from block 5000038 (first tx)
     let tx0_hash = blocks[3].transactions[0].hash; // index 3 = block 5000038
-    let (bn, idx): (i64, i32) = sqlx::query_as(
-        "SELECT block_number, tx_index FROM transactions WHERE tx_hash = ?",
-    )
-    .bind(tx0_hash.as_slice())
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (bn, idx): (i64, i32) =
+        sqlx::query_as("SELECT block_number, tx_index FROM transactions WHERE tx_hash = ?")
+            .bind(tx0_hash.as_slice())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 5_000_038);
     assert_eq!(idx, 0);
 }
@@ -286,18 +329,14 @@ async fn backfill_query_logs_by_topic0() {
     db.insert_batch(&load_all_blocks()).await.unwrap();
 
     // Transfer event signature
-    let transfer_topic = hex::decode(
-        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-    )
-    .unwrap();
+    let transfer_topic =
+        hex::decode("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap();
 
-    let (count,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM event_logs WHERE topic0 = ?",
-    )
-    .bind(&transfer_topic)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM event_logs WHERE topic0 = ?")
+        .bind(&transfer_topic)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
 
     assert!(count > 0, "should find Transfer events across the range");
 }
@@ -307,12 +346,10 @@ async fn backfill_blocks_cover_full_range() {
     let db = setup().await;
     db.insert_batch(&load_all_blocks()).await.unwrap();
 
-    let rows: Vec<(i64,)> = sqlx::query_as(
-        "SELECT block_number FROM blocks ORDER BY block_number",
-    )
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
+    let rows: Vec<(i64,)> = sqlx::query_as("SELECT block_number FROM blocks ORDER BY block_number")
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
 
     let block_numbers: Vec<i64> = rows.into_iter().map(|r| r.0).collect();
     let expected: Vec<i64> = (5_000_035..=5_000_045).collect();

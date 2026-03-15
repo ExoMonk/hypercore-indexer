@@ -16,8 +16,7 @@ use hypercore_indexer::storage::Storage;
 /// Uses port 8124 (test compose) to avoid conflicting with dev on 8123.
 /// Override with CLICKHOUSE_URL env var if needed.
 fn clickhouse_url() -> String {
-    std::env::var("CLICKHOUSE_URL")
-        .unwrap_or_else(|_| "http://localhost:8124".to_string())
+    std::env::var("CLICKHOUSE_URL").unwrap_or_else(|_| "http://localhost:8124".to_string())
 }
 
 fn load_fixture(name: &str) -> Vec<u8> {
@@ -38,8 +37,15 @@ async fn setup() -> ClickHouseStorage {
     // Clean test data — ClickHouse uses ALTER TABLE DELETE (async)
     // then OPTIMIZE to force merge
     let client = ch.client();
-    for table in &["event_logs", "transactions", "system_transfers", "blocks", "indexer_cursor"] {
-        client.query(&format!("TRUNCATE TABLE IF EXISTS {table}"))
+    for table in &[
+        "event_logs",
+        "transactions",
+        "system_transfers",
+        "blocks",
+        "indexer_cursor",
+    ] {
+        client
+            .query(&format!("TRUNCATE TABLE IF EXISTS {table}"))
             .execute()
             .await
             .unwrap();
@@ -87,7 +93,8 @@ async fn insert_and_query_transactions() {
     ch.insert_block(&block).await.unwrap();
 
     // Query tx count
-    let count = ch.client()
+    let count = ch
+        .client()
         .query("SELECT count() FROM transactions WHERE block_number = ?")
         .bind(5_000_038u64)
         .fetch_one::<u64>()
@@ -107,7 +114,8 @@ async fn insert_and_query_transactions() {
     assert_eq!(row.2, 1); // success = true
 
     // Query reverted tx (index 3)
-    let row = ch.client()
+    let row = ch
+        .client()
         .query("SELECT success FROM transactions WHERE block_number = ? AND tx_index = 3")
         .bind(5_000_038u64)
         .fetch_one::<u8>()
@@ -144,7 +152,8 @@ async fn insert_and_query_system_transfers() {
     assert_ne!(row.1, row.2, "official and explorer hashes must differ");
 
     // Query by official hash
-    let count = ch.client()
+    let count = ch
+        .client()
         .query("SELECT count() FROM system_transfers WHERE official_hash = ?")
         .bind(&row.1)
         .fetch_one::<u64>()
@@ -153,7 +162,8 @@ async fn insert_and_query_system_transfers() {
     assert_eq!(count, 1);
 
     // Query by explorer hash
-    let count = ch.client()
+    let count = ch
+        .client()
         .query("SELECT count() FROM system_transfers WHERE explorer_hash = ?")
         .bind(&row.2)
         .fetch_one::<u64>()
@@ -174,7 +184,8 @@ async fn insert_and_query_event_logs() {
 
     ch.insert_block(&block).await.unwrap();
 
-    let total = ch.client()
+    let total = ch
+        .client()
         .query("SELECT count() FROM event_logs WHERE block_number = ?")
         .bind(5_000_038u64)
         .fetch_one::<u64>()
@@ -228,10 +239,19 @@ async fn idempotent_insert() {
     ch.insert_block(&block).await.unwrap(); // no error
 
     // ReplacingMergeTree deduplicates on OPTIMIZE FINAL
-    ch.client().query("OPTIMIZE TABLE blocks FINAL").execute().await.unwrap();
-    ch.client().query("OPTIMIZE TABLE transactions FINAL").execute().await.unwrap();
+    ch.client()
+        .query("OPTIMIZE TABLE blocks FINAL")
+        .execute()
+        .await
+        .unwrap();
+    ch.client()
+        .query("OPTIMIZE TABLE transactions FINAL")
+        .execute()
+        .await
+        .unwrap();
 
-    let count = ch.client()
+    let count = ch
+        .client()
         .query("SELECT count() FROM blocks FINAL WHERE block_number = ?")
         .bind(5_000_038u64)
         .fetch_one::<u64>()
@@ -255,14 +275,16 @@ async fn batch_insert() {
 
     ch.insert_batch(&[block1, block2, block3]).await.unwrap();
 
-    let count = ch.client()
+    let count = ch
+        .client()
         .query("SELECT count() FROM blocks")
         .fetch_one::<u64>()
         .await
         .unwrap();
     assert_eq!(count, 3);
 
-    let tx_count = ch.client()
+    let tx_count = ch
+        .client()
         .query("SELECT count() FROM transactions")
         .fetch_one::<u64>()
         .await
@@ -286,7 +308,8 @@ async fn batch_insert_with_cursor() {
         .await
         .unwrap();
 
-    let count = ch.client()
+    let count = ch
+        .client()
         .query("SELECT count() FROM blocks")
         .fetch_one::<u64>()
         .await

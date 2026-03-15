@@ -8,9 +8,13 @@ pub struct BlockAndReceipts {
     pub receipts: Vec<TransactionReceipt>,
     #[serde(default)]
     pub system_txs: Vec<SystemTx>,
+    /// Required for MessagePack deserialization compatibility.
     #[serde(default)]
+    #[allow(dead_code)]
     pub read_precompile_calls: Vec<serde_json::Value>,
+    /// Required for MessagePack deserialization compatibility.
     #[serde(default)]
+    #[allow(dead_code)]
     pub highest_precompile_address: Option<Address>,
 }
 
@@ -49,8 +53,10 @@ pub struct WireSealedHeader {
 /// logsBloom, difficulty, number, gasLimit, gasUsed, timestamp, extraData,
 /// mixHash, nonce, baseFeePerGas, withdrawalsRoot, blobGasUsed, excessBlobGas,
 /// parentBeaconBlockRoot.
+/// All fields required for MessagePack deserialization compatibility, even if not all are read in Rust.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct WireHeader {
     pub parent_hash: B256,
     #[serde(rename = "sha3Uncles")]
@@ -92,9 +98,13 @@ pub struct WireHeader {
 #[derive(Debug, Deserialize)]
 pub struct WireBlockBody {
     pub transactions: Vec<WireSignedTx>,
+    /// Required for MessagePack deserialization compatibility.
     #[serde(default)]
+    #[allow(dead_code)]
     pub ommers: Vec<serde_json::Value>,
+    /// Required for MessagePack deserialization compatibility.
     #[serde(default)]
+    #[allow(dead_code)]
     pub withdrawals: Option<Vec<serde_json::Value>>,
 }
 
@@ -124,7 +134,9 @@ impl WireTxEnum {
         }
     }
 
-    pub fn from_addr(&self) -> Option<Address> {
+    /// Future use for signer recovery (M4+).
+    #[allow(dead_code)]
+    pub fn sender(&self) -> Option<Address> {
         // Transaction doesn't contain from — it's recovered from signature
         None
     }
@@ -312,7 +324,9 @@ pub struct SystemTx {
 /// No rename_all needed — these are the actual field names.
 #[derive(Debug, Deserialize)]
 pub struct TransactionReceipt {
+    /// Required for MessagePack deserialization compatibility.
     #[serde(deserialize_with = "deserialize_tx_type_string")]
+    #[allow(dead_code)]
     pub tx_type: String,
     pub success: bool,
     pub cumulative_gas_used: u64,
@@ -896,9 +910,18 @@ mod tests {
 
     #[test]
     fn network_from_str() {
-        assert!(matches!("mainnet".parse::<crate::s3::client::Network>().unwrap(), crate::s3::client::Network::Mainnet));
-        assert!(matches!("testnet".parse::<crate::s3::client::Network>().unwrap(), crate::s3::client::Network::Testnet));
-        assert!(matches!("Mainnet".parse::<crate::s3::client::Network>().unwrap(), crate::s3::client::Network::Mainnet));
+        assert!(matches!(
+            "mainnet".parse::<crate::s3::client::Network>().unwrap(),
+            crate::s3::client::Network::Mainnet
+        ));
+        assert!(matches!(
+            "testnet".parse::<crate::s3::client::Network>().unwrap(),
+            crate::s3::client::Network::Testnet
+        ));
+        assert!(matches!(
+            "Mainnet".parse::<crate::s3::client::Network>().unwrap(),
+            crate::s3::client::Network::Mainnet
+        ));
         assert!("invalid".parse::<crate::s3::client::Network>().is_err());
     }
 

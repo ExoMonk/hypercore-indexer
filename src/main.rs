@@ -18,7 +18,10 @@ use s3::client::{HyperEvmS3Client, Network};
 use s3::codec;
 
 #[derive(Parser)]
-#[command(name = "hypercore-indexer", about = "Hyperliquid HyperCore/HyperEVM S3 block indexer")]
+#[command(
+    name = "hypercore-indexer",
+    about = "Hyperliquid HyperCore/HyperEVM S3 block indexer"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -127,7 +130,11 @@ async fn main() -> Result<()> {
     });
 
     match cli.command {
-        Commands::Init { storage, url, target_network: net } => {
+        Commands::Init {
+            storage,
+            url,
+            target_network: net,
+        } => {
             let config_path = &cli.config;
             if config_path.exists() {
                 return Err(eyre::eyre!(
@@ -237,8 +244,6 @@ retry_delay_ms = 1000
             database_url,
             batch_size,
         } => {
-            use storage::Storage;
-
             let client = HyperEvmS3Client::new(region, network).await?;
             let client = Arc::new(client);
             let chain_id = network.chain_id();
@@ -246,8 +251,16 @@ retry_delay_ms = 1000
 
             // Resolve database URL: CLI flag > env var > config file
             let effective_db_url = cfg.database_url(database_url.as_deref());
-            let effective_workers = if workers == 64 { cfg.pipeline.workers } else { workers };
-            let effective_batch_size = if batch_size == 100 { cfg.storage.batch_size } else { batch_size };
+            let effective_workers = if workers == 64 {
+                cfg.pipeline.workers
+            } else {
+                workers
+            };
+            let effective_batch_size = if batch_size == 100 {
+                cfg.storage.batch_size
+            } else {
+                batch_size
+            };
 
             // Connect to storage backend if database_url is available
             // Detection: sqlite: → SQLite, http(s):// → ClickHouse, else → PostgreSQL
@@ -373,7 +386,7 @@ retry_delay_ms = 1000
                 // No storage: just consume blocks (original behavior)
                 while let Some((block_num, _block)) = rx.recv().await {
                     count += 1;
-                    if count % 10000 == 0 {
+                    if count.is_multiple_of(10000) {
                         info!(block_num, total_received = count, "Consuming blocks");
                     }
                 }

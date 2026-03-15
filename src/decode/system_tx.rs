@@ -7,25 +7,22 @@ use super::types::{AssetType, DecodedSystemTx};
 
 /// The HYPE native bridge address.
 const HYPE_SYSTEM_ADDRESS: Address = Address::new([
-    0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
-    0x22, 0x22, 0x22, 0x22, 0x22,
+    0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
+    0x22, 0x22, 0x22, 0x22,
 ]);
 
 /// Spot token bridge address prefix: 0x2000000000000000000000000000000000000{assetIndex}
 /// The last 2 bytes encode the asset index.
 const SPOT_ADDRESS_PREFIX: [u8; 18] = [
-    0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00,
+    0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00,
 ];
 
 /// ERC20 `transfer(address,uint256)` function selector.
 const TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
 
 /// Decode a system transaction into an enriched struct with dual hashes and asset identification.
-pub fn decode_system_tx(
-    stx: &SystemTx,
-    chain_id: u64,
-) -> eyre::Result<DecodedSystemTx> {
+pub fn decode_system_tx(stx: &SystemTx, chain_id: u64) -> eyre::Result<DecodedSystemTx> {
     let to = stx
         .tx
         .to()
@@ -141,8 +138,8 @@ fn decode_transfer_input(input: &[u8]) -> eyre::Result<(Address, U256)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::Bytes;
     use crate::types::block::{WireLegacyTx, WireTxEnum};
+    use alloy_primitives::Bytes;
 
     fn make_system_tx(to: Address, value: U256, input: Bytes) -> SystemTx {
         SystemTx {
@@ -161,7 +158,9 @@ mod tests {
 
     #[test]
     fn hype_detection() {
-        let recipient: Address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".parse().unwrap();
+        let recipient: Address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+            .parse()
+            .unwrap();
         let stx = make_system_tx(
             recipient,
             U256::from(1_000_000_000_000_000_000u128), // 1 HYPE
@@ -172,14 +171,21 @@ mod tests {
         assert_eq!(decoded.asset_type, AssetType::NativeHype);
         assert_eq!(decoded.system_address, HYPE_SYSTEM_ADDRESS);
         assert_eq!(decoded.recipient, recipient);
-        assert_eq!(decoded.amount_wei, U256::from(1_000_000_000_000_000_000u128));
+        assert_eq!(
+            decoded.amount_wei,
+            U256::from(1_000_000_000_000_000_000u128)
+        );
     }
 
     #[test]
     fn spot_token_detection() {
         // Spot token with asset index 4
-        let token_addr: Address = "0x2000000000000000000000000000000000000004".parse().unwrap();
-        let recipient: Address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap();
+        let token_addr: Address = "0x2000000000000000000000000000000000000004"
+            .parse()
+            .unwrap();
+        let recipient: Address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .parse()
+            .unwrap();
         let amount = U256::from(500_000u64);
 
         // Build transfer(address,uint256) calldata
@@ -203,7 +209,9 @@ mod tests {
 
     #[test]
     fn transfer_abi_decode_known_bytes() {
-        let recipient: Address = "0x1234567890abcdef1234567890abcdef12345678".parse().unwrap();
+        let recipient: Address = "0x1234567890abcdef1234567890abcdef12345678"
+            .parse()
+            .unwrap();
         let amount = U256::from(42_000_000u64);
 
         let mut input = Vec::with_capacity(68);
@@ -226,16 +234,22 @@ mod tests {
 
     #[test]
     fn extract_spot_index_valid() {
-        let addr: Address = "0x2000000000000000000000000000000000000004".parse().unwrap();
+        let addr: Address = "0x2000000000000000000000000000000000000004"
+            .parse()
+            .unwrap();
         assert_eq!(extract_spot_asset_index(addr).unwrap(), 4);
 
-        let addr2: Address = "0x2000000000000000000000000000000000000100".parse().unwrap();
+        let addr2: Address = "0x2000000000000000000000000000000000000100"
+            .parse()
+            .unwrap();
         assert_eq!(extract_spot_asset_index(addr2).unwrap(), 256);
     }
 
     #[test]
     fn extract_spot_index_invalid_prefix() {
-        let addr: Address = "0x3000000000000000000000000000000000000004".parse().unwrap();
+        let addr: Address = "0x3000000000000000000000000000000000000004"
+            .parse()
+            .unwrap();
         assert!(extract_spot_asset_index(addr).is_err());
     }
 }

@@ -3,7 +3,7 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 use std::str::FromStr;
 use tracing::info;
 
-use crate::decode::types::{DecodedBlock, DecodedTx, TxType};
+use crate::decode::types::{DecodedBlock, DecodedTx};
 
 use super::postgres::{asset_type_to_db, tx_type_to_smallint};
 use super::Storage;
@@ -108,6 +108,8 @@ impl SqliteStorage {
         Ok(Self { pool })
     }
 
+    /// Used by tests for direct queries.
+    #[allow(dead_code)]
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
@@ -123,7 +125,9 @@ impl SqliteStorage {
             sqlx::query(trimmed)
                 .execute(&self.pool)
                 .await
-                .map_err(|e| eyre::eyre!("Failed to execute schema SQL: {e}\nStatement: {trimmed}"))?;
+                .map_err(|e| {
+                    eyre::eyre!("Failed to execute schema SQL: {e}\nStatement: {trimmed}")
+                })?;
         }
         info!("SQLite schema ensured");
         Ok(())
@@ -257,7 +261,10 @@ impl Storage for SqliteStorage {
     }
 
     async fn insert_batch(&self, blocks: &[DecodedBlock]) -> eyre::Result<()> {
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
 
         for block in blocks {
@@ -266,7 +273,8 @@ impl Storage for SqliteStorage {
             Self::insert_system_transfers(&mut tx, block).await?;
         }
 
-        tx.commit().await
+        tx.commit()
+            .await
             .map_err(|e| eyre::eyre!("Failed to commit transaction: {e}"))?;
 
         Ok(())
@@ -278,7 +286,10 @@ impl Storage for SqliteStorage {
         network: &str,
         block_number: u64,
     ) -> eyre::Result<()> {
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
 
         for block in blocks {
@@ -289,7 +300,8 @@ impl Storage for SqliteStorage {
 
         Self::set_cursor_in_tx(&mut tx, network, block_number).await?;
 
-        tx.commit().await
+        tx.commit()
+            .await
             .map_err(|e| eyre::eyre!("Failed to commit transaction: {e}"))?;
 
         Ok(())

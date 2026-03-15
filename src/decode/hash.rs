@@ -1,9 +1,7 @@
 use alloy_primitives::{B256, U256};
 use tiny_keccak::{Hasher, Keccak};
 
-use crate::types::block::{
-    WireEip1559Tx, WireEip2930Tx, WireLegacyTx, WireSignedTx, WireTxEnum,
-};
+use crate::types::block::{WireEip1559Tx, WireEip2930Tx, WireLegacyTx, WireSignedTx, WireTxEnum};
 
 use super::types::DualHash;
 
@@ -33,7 +31,11 @@ pub fn compute_tx_hash(tx: &WireSignedTx) -> B256 {
 ///
 /// Official (Hyperliquid RPC): v = chainId*2+35, r = 0, s = 0
 /// Explorer (nanoreth/Hyperscan): v = chainId*2+36, r = 1, s = fromAddress as U256
-pub fn compute_system_tx_dual_hash(tx: &WireTxEnum, chain_id: u64, from: &alloy_primitives::Address) -> DualHash {
+pub fn compute_system_tx_dual_hash(
+    tx: &WireTxEnum,
+    chain_id: u64,
+    from: &alloy_primitives::Address,
+) -> DualHash {
     match tx {
         WireTxEnum::Legacy(inner) => {
             let official = compute_legacy_phantom_hash(inner, chain_id, false, from);
@@ -52,10 +54,7 @@ pub fn compute_system_tx_dual_hash(tx: &WireTxEnum, chain_id: u64, from: &alloy_
 
 // --- Legacy signed tx hash ---
 
-fn compute_legacy_signed_hash(
-    tx: &WireLegacyTx,
-    sig: &crate::types::block::WireSignature,
-) -> B256 {
+fn compute_legacy_signed_hash(tx: &WireLegacyTx, sig: &crate::types::block::WireSignature) -> B256 {
     // Compute v value for legacy: chain_id based EIP-155 or simple 27/28
     let v = match tx.chain_id {
         Some(chain_id) => {
@@ -367,7 +366,11 @@ mod tests {
             nonce: 0,
             gas_price: 20_000_000_000, // 20 gwei
             gas_limit: 21000,
-            to: Some("0xd46e8dd67c5d32be8058bb8eb970870f07244567".parse().unwrap()),
+            to: Some(
+                "0xd46e8dd67c5d32be8058bb8eb970870f07244567"
+                    .parse()
+                    .unwrap(),
+            ),
             value: U256::from(1_000_000_000_000_000_000u128), // 1 ETH
             input: Bytes::new(),
             chain_id: Some(1),
@@ -400,18 +403,27 @@ mod tests {
             nonce: 42,
             gas_price: 0,
             gas_limit: 100_000,
-            to: Some("0x9b498c3c8a0b8cd8ba1d9851d40d186f1872b44e".parse().unwrap()),
+            to: Some(
+                "0x9b498c3c8a0b8cd8ba1d9851d40d186f1872b44e"
+                    .parse()
+                    .unwrap(),
+            ),
             value: U256::ZERO,
             input: Bytes::from_static(&[0xa9, 0x05, 0x9c, 0xbb, 0x00, 0x00]),
             chain_id: Some(999),
         });
 
-        let from: Address = "0x2000000000000000000000000000000000000004".parse().unwrap();
+        let from: Address = "0x2000000000000000000000000000000000000004"
+            .parse()
+            .unwrap();
         let dual = compute_system_tx_dual_hash(&tx, 999, &from);
 
         assert!(!dual.official.is_zero());
         assert!(!dual.explorer.is_zero());
-        assert_ne!(dual.official, dual.explorer, "official and explorer hashes must differ");
+        assert_ne!(
+            dual.official, dual.explorer,
+            "official and explorer hashes must differ"
+        );
     }
 
     /// Same tx with different chain_id produces different hashes.
@@ -421,13 +433,19 @@ mod tests {
             nonce: 1,
             gas_price: 0,
             gas_limit: 21000,
-            to: Some("0x2222222222222222222222222222222222222222".parse().unwrap()),
+            to: Some(
+                "0x2222222222222222222222222222222222222222"
+                    .parse()
+                    .unwrap(),
+            ),
             value: U256::from(1_000_000u64),
             input: Bytes::new(),
             chain_id: Some(999),
         });
 
-        let from: Address = "0x2222222222222222222222222222222222222222".parse().unwrap();
+        let from: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
         let hash_999 = compute_system_tx_dual_hash(&tx, 999, &from);
         let hash_998 = compute_system_tx_dual_hash(&tx, 998, &from);
 
@@ -465,7 +483,9 @@ mod tests {
 
         // Address (20 bytes) encodes as 0x94 + 20 bytes
         buf.clear();
-        let addr: Address = "0x0000000000000000000000000000000000000001".parse().unwrap();
+        let addr: Address = "0x0000000000000000000000000000000000000001"
+            .parse()
+            .unwrap();
         rlp_encode_optional_address(Some(addr), &mut buf);
         assert_eq!(buf.len(), 21); // 1 prefix + 20 bytes
         assert_eq!(buf[0], 0x94);

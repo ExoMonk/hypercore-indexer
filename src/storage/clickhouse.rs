@@ -151,6 +151,8 @@ impl ClickHouseStorage {
         Ok(Self { client })
     }
 
+    /// Used by tests and for direct queries.
+    #[allow(dead_code)]
     pub fn client(&self) -> &Client {
         &self.client
     }
@@ -267,10 +269,26 @@ impl ClickHouseStorage {
                             tx_index: dtx.tx_index as u32,
                             log_index: log.log_index as u32,
                             address: to_hex(log.address.as_slice()),
-                            topic0: log.topics.first().map(|t| to_hex(t.as_slice())).unwrap_or_default(),
-                            topic1: log.topics.get(1).map(|t| to_hex(t.as_slice())).unwrap_or_default(),
-                            topic2: log.topics.get(2).map(|t| to_hex(t.as_slice())).unwrap_or_default(),
-                            topic3: log.topics.get(3).map(|t| to_hex(t.as_slice())).unwrap_or_default(),
+                            topic0: log
+                                .topics
+                                .first()
+                                .map(|t| to_hex(t.as_slice()))
+                                .unwrap_or_default(),
+                            topic1: log
+                                .topics
+                                .get(1)
+                                .map(|t| to_hex(t.as_slice()))
+                                .unwrap_or_default(),
+                            topic2: log
+                                .topics
+                                .get(2)
+                                .map(|t| to_hex(t.as_slice()))
+                                .unwrap_or_default(),
+                            topic3: log
+                                .topics
+                                .get(3)
+                                .map(|t| to_hex(t.as_slice()))
+                                .unwrap_or_default(),
                             data: hex::encode(&log.data),
                         })
                         .await

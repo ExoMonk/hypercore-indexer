@@ -8,7 +8,6 @@
 //! type conversion, or SQL mapping changes, they catch it.
 
 use hypercore_indexer::decode;
-use hypercore_indexer::decode::types::{AssetType, TxType};
 use hypercore_indexer::s3::codec;
 use hypercore_indexer::storage::sqlite::SqliteStorage;
 use hypercore_indexer::storage::Storage;
@@ -53,8 +52,14 @@ async fn pipeline_block_5000038_blocks_table() {
     .unwrap();
 
     assert_eq!(row.0, 5_000_038);
-    assert_eq!(hex::encode(&row.1), "6639e377dc4aba11f210dc95b0024f15840d0289a82abf883ef3825a85fa9508");
-    assert_eq!(hex::encode(&row.2), "87b447ef1a1b8327b32aab6f7a671c0ad6239efcf56386fabaec87c909a198d5");
+    assert_eq!(
+        hex::encode(&row.1),
+        "6639e377dc4aba11f210dc95b0024f15840d0289a82abf883ef3825a85fa9508"
+    );
+    assert_eq!(
+        hex::encode(&row.2),
+        "87b447ef1a1b8327b32aab6f7a671c0ad6239efcf56386fabaec87c909a198d5"
+    );
     assert_eq!(row.3, 1_749_160_149);
     assert_eq!(row.4, 1_722_800);
     assert_eq!(row.5, 2_000_000);
@@ -99,7 +104,11 @@ async fn pipeline_block_5000038_all_tx_hashes_stored() {
 
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(row.0, i as i32, "tx_index mismatch at {i}");
-        assert_eq!(hex::encode(&row.1), expected_hashes[i], "tx_hash mismatch at {i}");
+        assert_eq!(
+            hex::encode(&row.1),
+            expected_hashes[i],
+            "tx_hash mismatch at {i}"
+        );
         assert_eq!(row.2, expected_types[i], "tx_type mismatch at {i}");
         assert_eq!(row.3, expected_gas[i], "gas_used mismatch at {i}");
         assert_eq!(row.4, expected_success[i], "success mismatch at {i}");
@@ -158,23 +167,21 @@ async fn pipeline_block_5000038_system_transfer_dual_hashes() {
     assert_ne!(row.6, "0");
 
     // Query by official hash — must find the same row
-    let (bn,): (i64,) = sqlx::query_as(
-        "SELECT block_number FROM system_transfers WHERE official_hash = ?",
-    )
-    .bind(&row.0)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (bn,): (i64,) =
+        sqlx::query_as("SELECT block_number FROM system_transfers WHERE official_hash = ?")
+            .bind(&row.0)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 5_000_038);
 
     // Query by explorer hash — must find the same row
-    let (bn,): (i64,) = sqlx::query_as(
-        "SELECT block_number FROM system_transfers WHERE explorer_hash = ?",
-    )
-    .bind(&row.1)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (bn,): (i64,) =
+        sqlx::query_as("SELECT block_number FROM system_transfers WHERE explorer_hash = ?")
+            .bind(&row.1)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 5_000_038);
 }
 
@@ -187,13 +194,11 @@ async fn pipeline_block_5000038_event_logs_with_topics() {
     db.insert_block(&decoded).await.unwrap();
 
     // Total logs stored
-    let (total,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM event_logs WHERE block_number = ?",
-    )
-    .bind(5_000_038i64)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (total,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM event_logs WHERE block_number = ?")
+        .bind(5_000_038i64)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     assert!(total > 0, "block should have event logs");
 
     // First log: Transfer event from HYPE token (0x5555...)
@@ -221,15 +226,15 @@ async fn pipeline_block_5000038_event_logs_with_topics() {
     assert!(!row.4.is_empty(), "log data should be non-empty");
 
     // Query Transfer events by topic0 across all txs in block
-    let transfer_topic = hex::decode("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap();
-    let (transfer_count,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM event_logs WHERE block_number = ? AND topic0 = ?",
-    )
-    .bind(5_000_038i64)
-    .bind(&transfer_topic)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let transfer_topic =
+        hex::decode("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap();
+    let (transfer_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM event_logs WHERE block_number = ? AND topic0 = ?")
+            .bind(5_000_038i64)
+            .bind(&transfer_topic)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert!(transfer_count > 0, "should have Transfer events");
 }
 
@@ -246,13 +251,12 @@ async fn pipeline_empty_block() {
     db.insert_block(&decoded).await.unwrap();
 
     // Block stored
-    let (bn, hash): (i64, Vec<u8>) = sqlx::query_as(
-        "SELECT block_number, block_hash FROM blocks WHERE block_number = ?",
-    )
-    .bind(1i64)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (bn, hash): (i64, Vec<u8>) =
+        sqlx::query_as("SELECT block_number, block_hash FROM blocks WHERE block_number = ?")
+            .bind(1i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 1);
     assert_eq!(
         hex::encode(&hash),
@@ -260,12 +264,21 @@ async fn pipeline_empty_block() {
     );
 
     // No child rows
-    let (tx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = 1")
-        .fetch_one(db.pool()).await.unwrap();
-    let (log_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM event_logs WHERE block_number = 1")
-        .fetch_one(db.pool()).await.unwrap();
-    let (stx_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM system_transfers WHERE block_number = 1")
-        .fetch_one(db.pool()).await.unwrap();
+    let (tx_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let (log_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM event_logs WHERE block_number = 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let (stx_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM system_transfers WHERE block_number = 1")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(tx_count, 0);
     assert_eq!(log_count, 0);
     assert_eq!(stx_count, 0);
@@ -299,12 +312,11 @@ async fn pipeline_batch_with_cursor_resume() {
     assert_eq!(cursor, Some(5_000_038));
 
     // Verify both blocks stored
-    let rows: Vec<(i64, i32)> = sqlx::query_as(
-        "SELECT block_number, tx_count FROM blocks ORDER BY block_number",
-    )
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
+    let rows: Vec<(i64, i32)> =
+        sqlx::query_as("SELECT block_number, tx_count FROM blocks ORDER BY block_number")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
     assert_eq!(rows, vec![(1, 0), (5_000_038, 8)]);
 
     // Simulate resume: cursor tells us to start from 5_000_039
@@ -328,16 +340,27 @@ async fn pipeline_idempotent_reprocess() {
     db.insert_block(&decoded).await.unwrap();
 
     // Everything should still be count=1
-    let (blocks,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blocks").fetch_one(db.pool()).await.unwrap();
-    let (txs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions").fetch_one(db.pool()).await.unwrap();
-    let (stxs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM system_transfers").fetch_one(db.pool()).await.unwrap();
+    let (blocks,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM blocks")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let (txs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let (stxs,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM system_transfers")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     assert_eq!(blocks, 1);
     assert_eq!(txs, 8);
     assert_eq!(stxs, 1);
 
     // Hashes should still be correct (not doubled/corrupted)
     let (hash,): (Vec<u8>,) = sqlx::query_as("SELECT tx_hash FROM transactions WHERE tx_index = 0")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     assert_eq!(
         hex::encode(&hash),
         "1f912cb736959444532212379df30c07b78c8c1761200550bf92eff37cf6d998"
@@ -357,13 +380,12 @@ async fn pipeline_testnet_block() {
     let decoded = decode::decode_block(&raw, 998).unwrap();
     db.insert_block(&decoded).await.unwrap();
 
-    let (bn, hash): (i64, Vec<u8>) = sqlx::query_as(
-        "SELECT block_number, block_hash FROM blocks WHERE block_number = ?",
-    )
-    .bind(48_186_001i64)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let (bn, hash): (i64, Vec<u8>) =
+        sqlx::query_as("SELECT block_number, block_hash FROM blocks WHERE block_number = ?")
+            .bind(48_186_001i64)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 48_186_001);
     assert_eq!(
         hex::encode(&hash),

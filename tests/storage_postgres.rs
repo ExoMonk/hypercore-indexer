@@ -16,8 +16,9 @@ use hypercore_indexer::storage::Storage;
 /// Uses port 5433 (test compose) to avoid conflicting with dev on 5432.
 /// Override with DATABASE_URL env var if needed.
 fn database_url() -> String {
-    std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5433/hypercore_test".to_string())
+    std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://postgres:postgres@localhost:5433/hypercore_test".to_string()
+    })
 }
 
 fn load_fixture(name: &str) -> Vec<u8> {
@@ -108,11 +109,12 @@ async fn insert_and_query_transactions() {
     assert!(row.6); // success = true
 
     // Verify total transaction count
-    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = $1")
-        .bind(5_000_038i64)
-        .fetch_one(pg.pool())
-        .await
-        .unwrap();
+    let (count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM transactions WHERE block_number = $1")
+            .bind(5_000_038i64)
+            .fetch_one(pg.pool())
+            .await
+            .unwrap();
     assert_eq!(count, 8);
 }
 
@@ -146,23 +148,21 @@ async fn insert_and_query_system_transfers() {
     assert_eq!(row.4, Some(0i16));
 
     // Query by official hash
-    let (bn,): (i64,) = sqlx::query_as(
-        "SELECT block_number FROM system_transfers WHERE official_hash = $1",
-    )
-    .bind(stx.official_hash.as_slice())
-    .fetch_one(pg.pool())
-    .await
-    .unwrap();
+    let (bn,): (i64,) =
+        sqlx::query_as("SELECT block_number FROM system_transfers WHERE official_hash = $1")
+            .bind(stx.official_hash.as_slice())
+            .fetch_one(pg.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 5_000_038);
 
     // Query by explorer hash
-    let (bn,): (i64,) = sqlx::query_as(
-        "SELECT block_number FROM system_transfers WHERE explorer_hash = $1",
-    )
-    .bind(stx.explorer_hash.as_slice())
-    .fetch_one(pg.pool())
-    .await
-    .unwrap();
+    let (bn,): (i64,) =
+        sqlx::query_as("SELECT block_number FROM system_transfers WHERE explorer_hash = $1")
+            .bind(stx.explorer_hash.as_slice())
+            .fetch_one(pg.pool())
+            .await
+            .unwrap();
     assert_eq!(bn, 5_000_038);
 }
 
@@ -288,11 +288,10 @@ async fn batch_insert() {
     assert_eq!(count, 3);
 
     // Verify ordering by querying block numbers
-    let rows: Vec<(i64,)> =
-        sqlx::query_as("SELECT block_number FROM blocks ORDER BY block_number")
-            .fetch_all(pg.pool())
-            .await
-            .unwrap();
+    let rows: Vec<(i64,)> = sqlx::query_as("SELECT block_number FROM blocks ORDER BY block_number")
+        .fetch_all(pg.pool())
+        .await
+        .unwrap();
     assert_eq!(rows[0].0, 1);
     assert_eq!(rows[1].0, 5_000_038);
     assert_eq!(rows[2].0, 48_186_001);

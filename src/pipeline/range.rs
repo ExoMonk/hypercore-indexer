@@ -171,7 +171,7 @@ impl RangeFetcher {
                     }
 
                     // Update cursor every 100 blocks
-                    if batch_count % 100 == 0 {
+                    if batch_count.is_multiple_of(100) {
                         if let Err(e) = write_cursor(&path, contiguous_cursor) {
                             warn!(error = %e, "Failed to write cursor file");
                         }

@@ -25,7 +25,7 @@ impl ProgressTracker {
     pub fn record_success(&self) {
         let prev = self.processed.fetch_add(1, Ordering::Relaxed);
         let count = prev + 1;
-        if count % self.log_interval == 0 || count == self.total_blocks {
+        if count.is_multiple_of(self.log_interval) || count == self.total_blocks {
             self.log_progress(count);
         }
     }
@@ -36,7 +36,7 @@ impl ProgressTracker {
         self.failed.fetch_add(1, Ordering::Relaxed);
         let prev = self.processed.fetch_add(1, Ordering::Relaxed);
         let count = prev + 1;
-        if count % self.log_interval == 0 || count == self.total_blocks {
+        if count.is_multiple_of(self.log_interval) || count == self.total_blocks {
             self.log_progress(count);
         }
     }
@@ -91,10 +91,14 @@ impl ProgressTracker {
         }
     }
 
+    /// Public API — used by callers and tests to inspect progress state.
+    #[allow(dead_code)]
     pub fn processed(&self) -> u64 {
         self.processed.load(Ordering::Relaxed)
     }
 
+    /// Public API — used by callers and tests to inspect progress state.
+    #[allow(dead_code)]
     pub fn failed(&self) -> u64 {
         self.failed.load(Ordering::Relaxed)
     }

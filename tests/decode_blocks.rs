@@ -220,11 +220,20 @@ fn block_5m_tx_types_pinned() {
 
     // Pin exact tx type distribution for this block
     let expected_types = [
-        TxType::Eip1559, TxType::Eip1559, TxType::Legacy, TxType::Eip1559,
-        TxType::Eip1559, TxType::Eip1559, TxType::Eip1559, TxType::Legacy,
+        TxType::Eip1559,
+        TxType::Eip1559,
+        TxType::Legacy,
+        TxType::Eip1559,
+        TxType::Eip1559,
+        TxType::Eip1559,
+        TxType::Eip1559,
+        TxType::Legacy,
     ];
     for (i, tx) in decoded.transactions.iter().enumerate() {
-        assert_eq!(tx.tx_type, expected_types[i], "tx type mismatch at index {i}");
+        assert_eq!(
+            tx.tx_type, expected_types[i],
+            "tx type mismatch at index {i}"
+        );
     }
 }
 
@@ -289,7 +298,10 @@ fn block_5m_system_tx_decoded_fields_pinned() {
     let decoded = decode::decode_block(&raw, 999).unwrap();
 
     let stx = &decoded.system_transfers[0];
-    assert!(matches!(stx.asset_type, AssetType::SpotToken { asset_index: 0 }));
+    assert!(matches!(
+        stx.asset_type,
+        AssetType::SpotToken { asset_index: 0 }
+    ));
     assert_eq!(
         format!("{:#x}", stx.system_address),
         "0x9b498c3c8a0b8cd8ba1d9851d40d186f1872b44e"

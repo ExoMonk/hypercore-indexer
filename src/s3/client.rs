@@ -25,6 +25,8 @@ impl Network {
         }
     }
 
+    /// Needed for M4 (live mode) — RPC polling for new blocks.
+    #[allow(dead_code)]
     pub fn rpc_url(&self) -> &'static str {
         match self {
             Network::Mainnet => "https://rpc.hyperliquid.xyz/evm",
@@ -49,7 +51,10 @@ impl std::str::FromStr for Network {
         match s.to_lowercase().as_str() {
             "mainnet" => Ok(Network::Mainnet),
             "testnet" => Ok(Network::Testnet),
-            _ => Err(eyre::eyre!("unknown network '{}', expected 'mainnet' or 'testnet'", s)),
+            _ => Err(eyre::eyre!(
+                "unknown network '{}', expected 'mainnet' or 'testnet'",
+                s
+            )),
         }
     }
 }
@@ -57,6 +62,8 @@ impl std::str::FromStr for Network {
 pub struct HyperEvmS3Client {
     client: Client,
     bucket: String,
+    /// Needed for M4 (live mode) — network-aware RPC routing.
+    #[allow(dead_code)]
     network: Network,
 }
 
@@ -81,6 +88,8 @@ impl HyperEvmS3Client {
         })
     }
 
+    /// Needed for M4 (live mode).
+    #[allow(dead_code)]
     pub fn network(&self) -> Network {
         self.network
     }
@@ -143,6 +152,9 @@ mod tests {
         assert_eq!(block_to_s3_key(1), "0/0/1.rmp.lz4");
         assert_eq!(block_to_s3_key(1000), "0/0/1000.rmp.lz4");
         assert_eq!(block_to_s3_key(1001), "0/1000/1001.rmp.lz4");
-        assert_eq!(block_to_s3_key(1_000_001), "1000000/1000000/1000001.rmp.lz4");
+        assert_eq!(
+            block_to_s3_key(1_000_001),
+            "1000000/1000000/1000001.rmp.lz4"
+        );
     }
 }
