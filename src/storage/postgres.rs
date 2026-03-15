@@ -3,6 +3,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use tracing::info;
 
 use crate::decode::types::{AssetType, DecodedBlock, TxType};
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
 
 use super::Storage;
 
@@ -284,6 +285,190 @@ impl PostgresStorage {
         Ok(())
     }
 
+    /// Batch-insert HIP4 deposits using UNNEST.
+    async fn insert_hip4_deposits(pool: &PgPool, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.deposits.is_empty() {
+            return Ok(());
+        }
+
+        let len = data.deposits.len();
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut tx_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut log_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut contest_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut side_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut depositors: Vec<Vec<u8>> = Vec::with_capacity(len);
+        let mut amounts: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+
+        for d in &data.deposits {
+            block_numbers.push(d.block_number as i64);
+            tx_indexes.push(d.tx_index as i32);
+            log_indexes.push(d.log_index as i32);
+            contest_ids.push(d.contest_id as i64);
+            side_ids.push(d.side_id as i64);
+            depositors.push(d.depositor.as_slice().to_vec());
+            let amount_numeric: sqlx::types::BigDecimal = d
+                .amount_wei
+                .to_string()
+                .parse()
+                .map_err(|e| eyre::eyre!("Failed to parse U256 as BigDecimal: {e}"))?;
+            amounts.push(amount_numeric);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_deposits (block_number, tx_index, log_index, contest_id, side_id, depositor, amount_wei)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::INTEGER[], $3::INTEGER[], $4::BIGINT[], $5::BIGINT[], $6::BYTEA[], $7::NUMERIC[])
+               ON CONFLICT (block_number, tx_index, log_index) DO NOTHING"#,
+        )
+        .bind(&block_numbers)
+        .bind(&tx_indexes)
+        .bind(&log_indexes)
+        .bind(&contest_ids)
+        .bind(&side_ids)
+        .bind(&depositors)
+        .bind(&amounts)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_deposits: {e}"))?;
+
+        Ok(())
+    }
+
+    /// Batch-insert HIP4 claims using UNNEST.
+    async fn insert_hip4_claims(pool: &PgPool, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.claims.is_empty() {
+            return Ok(());
+        }
+
+        let len = data.claims.len();
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut tx_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut log_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut contest_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut side_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut claimers: Vec<Vec<u8>> = Vec::with_capacity(len);
+        let mut amounts: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+
+        for c in &data.claims {
+            block_numbers.push(c.block_number as i64);
+            tx_indexes.push(c.tx_index as i32);
+            log_indexes.push(c.log_index as i32);
+            contest_ids.push(c.contest_id as i64);
+            side_ids.push(c.side_id as i64);
+            claimers.push(c.claimer.as_slice().to_vec());
+            let amount_numeric: sqlx::types::BigDecimal = c
+                .amount_wei
+                .to_string()
+                .parse()
+                .map_err(|e| eyre::eyre!("Failed to parse U256 as BigDecimal: {e}"))?;
+            amounts.push(amount_numeric);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_claims (block_number, tx_index, log_index, contest_id, side_id, claimer, amount_wei)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::INTEGER[], $3::INTEGER[], $4::BIGINT[], $5::BIGINT[], $6::BYTEA[], $7::NUMERIC[])
+               ON CONFLICT (block_number, tx_index, log_index) DO NOTHING"#,
+        )
+        .bind(&block_numbers)
+        .bind(&tx_indexes)
+        .bind(&log_indexes)
+        .bind(&contest_ids)
+        .bind(&side_ids)
+        .bind(&claimers)
+        .bind(&amounts)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_claims: {e}"))?;
+
+        Ok(())
+    }
+
+    /// Batch-upsert HIP4 markets using UNNEST.
+    async fn upsert_hip4_markets_pg(pool: &PgPool, markets: &[Hip4Market]) -> eyre::Result<()> {
+        if markets.is_empty() {
+            return Ok(());
+        }
+
+        let len = markets.len();
+        let mut outcome_ids: Vec<i32> = Vec::with_capacity(len);
+        let mut names: Vec<String> = Vec::with_capacity(len);
+        let mut descriptions: Vec<String> = Vec::with_capacity(len);
+        let mut side_specs_vec: Vec<String> = Vec::with_capacity(len);
+        let mut question_ids: Vec<Option<i32>> = Vec::with_capacity(len);
+        let mut question_names: Vec<Option<String>> = Vec::with_capacity(len);
+
+        for m in markets {
+            outcome_ids.push(m.outcome_id as i32);
+            names.push(m.name.clone());
+            descriptions.push(m.description.clone());
+            side_specs_vec.push(m.side_specs.clone());
+            question_ids.push(m.question_id.map(|v| v as i32));
+            question_names.push(m.question_name.clone());
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_markets (outcome_id, name, description, side_specs, question_id, question_name, updated_at)
+               SELECT o, n, d, s, q, qn, NOW()
+               FROM UNNEST($1::INTEGER[], $2::TEXT[], $3::TEXT[], $4::TEXT[], $5::INTEGER[], $6::TEXT[]) AS t(o, n, d, s, q, qn)
+               ON CONFLICT (outcome_id) DO UPDATE SET
+                 name = EXCLUDED.name,
+                 description = EXCLUDED.description,
+                 side_specs = EXCLUDED.side_specs,
+                 question_id = EXCLUDED.question_id,
+                 question_name = EXCLUDED.question_name,
+                 updated_at = NOW()"#,
+        )
+        .bind(&outcome_ids)
+        .bind(&names)
+        .bind(&descriptions)
+        .bind(&side_specs_vec)
+        .bind(&question_ids)
+        .bind(&question_names)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to upsert hip4_markets: {e}"))?;
+
+        Ok(())
+    }
+
+    /// Batch-insert HIP4 prices using UNNEST.
+    async fn insert_hip4_prices_pg(pool: &PgPool, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
+        if prices.is_empty() {
+            return Ok(());
+        }
+
+        let len = prices.len();
+        let mut coins: Vec<String> = Vec::with_capacity(len);
+        let mut mid_prices: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut timestamps: Vec<i64> = Vec::with_capacity(len);
+
+        for p in prices {
+            coins.push(p.coin.clone());
+            let price_numeric: sqlx::types::BigDecimal = p
+                .mid_price
+                .parse()
+                .map_err(|e| eyre::eyre!("Failed to parse mid_price '{}' as BigDecimal: {e}", p.mid_price))?;
+            mid_prices.push(price_numeric);
+            // Convert ms to microseconds for PG TIMESTAMPTZ via to_timestamp()
+            timestamps.push(p.timestamp_ms);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_prices (coin, mid_price, timestamp)
+               SELECT c, p, to_timestamp(t::DOUBLE PRECISION / 1000.0)
+               FROM UNNEST($1::TEXT[], $2::NUMERIC[], $3::BIGINT[]) AS t(c, p, t)
+               ON CONFLICT (coin, timestamp) DO NOTHING"#,
+        )
+        .bind(&coins)
+        .bind(&mid_prices)
+        .bind(&timestamps)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to insert hip4_prices: {e}"))?;
+
+        Ok(())
+    }
+
     /// Update cursor within an existing transaction.
     async fn set_cursor_in_tx(
         tx: &mut Transaction<'_, Postgres>,
@@ -381,6 +566,20 @@ impl Storage for PostgresStorage {
         .map_err(|e| eyre::eyre!("Failed to set cursor: {e}"))?;
 
         Ok(())
+    }
+
+    async fn insert_hip4_data(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        Self::insert_hip4_deposits(&self.pool, data).await?;
+        Self::insert_hip4_claims(&self.pool, data).await?;
+        Ok(())
+    }
+
+    async fn upsert_hip4_markets(&self, markets: &[Hip4Market]) -> eyre::Result<()> {
+        Self::upsert_hip4_markets_pg(&self.pool, markets).await
+    }
+
+    async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
+        Self::insert_hip4_prices_pg(&self.pool, prices).await
     }
 }
 

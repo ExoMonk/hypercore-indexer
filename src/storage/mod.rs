@@ -3,6 +3,7 @@ pub mod postgres;
 pub mod sqlite;
 
 use crate::decode::types::DecodedBlock;
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
 
 #[async_trait::async_trait]
 #[allow(dead_code)]
@@ -26,4 +27,15 @@ pub trait Storage: Send + Sync {
 
     /// Set the cursor for a network.
     async fn set_cursor(&self, network: &str, block_number: u64) -> eyre::Result<()>;
+
+    /// Insert HIP4 decoded contest events (deposits and claims).
+    async fn insert_hip4_data(&self, data: &Hip4BlockData) -> eyre::Result<()>;
+
+    /// Upsert HIP4 market metadata from the outcomeMeta API.
+    /// On conflict (outcome_id), updates name, description, side_specs, question fields.
+    async fn upsert_hip4_markets(&self, markets: &[Hip4Market]) -> eyre::Result<()>;
+
+    /// Insert HIP4 price snapshots from the allMids API.
+    /// On conflict (coin, timestamp), does nothing (idempotent).
+    async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()>;
 }

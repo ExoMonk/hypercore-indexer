@@ -68,6 +68,51 @@ CREATE TABLE IF NOT EXISTS event_logs (
 CREATE INDEX IF NOT EXISTS idx_event_logs_address_topic0 ON event_logs (address, topic0);
 CREATE INDEX IF NOT EXISTS idx_event_logs_topic0 ON event_logs (topic0);
 
+CREATE TABLE IF NOT EXISTS hip4_deposits (
+    block_number    BIGINT NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    log_index       INTEGER NOT NULL,
+    contest_id      BIGINT NOT NULL,
+    side_id         BIGINT NOT NULL,
+    depositor       BYTEA NOT NULL,
+    amount_wei      NUMERIC NOT NULL,
+    PRIMARY KEY (block_number, tx_index, log_index)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_deposits_contest ON hip4_deposits (contest_id, side_id);
+CREATE INDEX IF NOT EXISTS idx_hip4_deposits_user ON hip4_deposits (depositor);
+
+CREATE TABLE IF NOT EXISTS hip4_claims (
+    block_number    BIGINT NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    log_index       INTEGER NOT NULL,
+    contest_id      BIGINT NOT NULL,
+    side_id         BIGINT NOT NULL,
+    claimer         BYTEA NOT NULL,
+    amount_wei      NUMERIC NOT NULL,
+    PRIMARY KEY (block_number, tx_index, log_index)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_claims_contest ON hip4_claims (contest_id, side_id);
+CREATE INDEX IF NOT EXISTS idx_hip4_claims_user ON hip4_claims (claimer);
+
+CREATE TABLE IF NOT EXISTS hip4_markets (
+    outcome_id      INTEGER NOT NULL,
+    name            TEXT NOT NULL,
+    description     TEXT NOT NULL,
+    side_specs      TEXT NOT NULL,
+    question_id     INTEGER,
+    question_name   TEXT,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (outcome_id)
+);
+
+CREATE TABLE IF NOT EXISTS hip4_prices (
+    coin            TEXT NOT NULL,
+    mid_price       NUMERIC NOT NULL,
+    timestamp       TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (coin, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_prices_time ON hip4_prices (timestamp);
+
 CREATE TABLE IF NOT EXISTS indexer_cursor (
     network         TEXT PRIMARY KEY,
     last_block      BIGINT NOT NULL,

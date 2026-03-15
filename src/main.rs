@@ -6,6 +6,7 @@ use tracing::info;
 mod config;
 mod decode;
 mod error;
+mod hip4;
 mod live;
 mod pipeline;
 mod s3;
@@ -105,6 +106,13 @@ enum Commands {
         batch_size: usize,
     },
 
+    /// Run only the HIP4 API poller (markets + prices) without the full indexer
+    Hip4Poll {
+        /// Database URL (overrides config)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: Option<String>,
+    },
+
     /// Follow the chain tip, continuously indexing new blocks from S3
     Live {
         /// Start block (if omitted, resumes from DB cursor)
@@ -193,6 +201,13 @@ min_poll_interval_ms = 200
 poll_decay = 0.67
 gap_threshold = 100
 backfill_workers = 64
+
+[hip4]
+enabled = false
+# contest_address = "0x4fd772e5708da2a7f097f51b3127e515a72744bd"
+# api_url = "https://api.hyperliquid-testnet.xyz/info"
+# meta_poll_interval_s = 60
+# price_poll_interval_s = 5
 "#
             );
 
@@ -380,12 +395,21 @@ backfill_workers = 64
 
                 let mut buffer: Vec<decode::types::DecodedBlock> =
                     Vec::with_capacity(effective_batch_size);
+                let mut hip4_buffer: Vec<hip4::types::Hip4BlockData> =
+                    Vec::with_capacity(effective_batch_size);
                 let mut contiguous_cursor = start_block.saturating_sub(1);
                 let mut pending: BTreeSet<u64> = BTreeSet::new();
 
                 while let Some((_block_num, raw_block)) = rx.recv().await {
                     let decoded = decode::decode_block(&raw_block, chain_id)?;
                     let block_num = decoded.number;
+
+                    // Process HIP4 data from the decoded block
+                    if cfg.hip4.enabled {
+                        let hip4_data = hip4::process_block(&decoded, &cfg.hip4);
+                        hip4_buffer.push(hip4_data);
+                    }
+
                     buffer.push(decoded);
                     count += 1;
 
@@ -404,6 +428,14 @@ backfill_workers = 64
                                 contiguous_cursor,
                             )
                             .await?;
+
+                        // Insert HIP4 data — failure is logged but does not kill the batch
+                        for hip4_data in &hip4_buffer {
+                            if let Err(e) = store.insert_hip4_data(hip4_data).await {
+                                tracing::warn!("Failed to insert HIP4 data: {e}");
+                            }
+                        }
+
                         info!(
                             batch_blocks = buffer.len(),
                             cursor = contiguous_cursor,
@@ -411,6 +443,7 @@ backfill_workers = 64
                             "Flushed batch to storage"
                         );
                         buffer.clear();
+                        hip4_buffer.clear();
                     }
                 }
 
@@ -419,6 +452,14 @@ backfill_workers = 64
                     store
                         .insert_batch_and_set_cursor(&buffer, &network_name, contiguous_cursor)
                         .await?;
+
+                    // Insert remaining HIP4 data — failure is logged but does not kill the batch
+                    for hip4_data in &hip4_buffer {
+                        if let Err(e) = store.insert_hip4_data(hip4_data).await {
+                            tracing::warn!("Failed to insert HIP4 data: {e}");
+                        }
+                    }
+
                     info!(
                         batch_blocks = buffer.len(),
                         cursor = contiguous_cursor,
@@ -436,6 +477,49 @@ backfill_workers = 64
             }
 
             info!(total_received = count, "Backfill complete");
+        }
+
+        Commands::Hip4Poll { database_url } => {
+            let effective_db_url = cfg.database_url(database_url.as_deref());
+            let db_url = effective_db_url.ok_or_else(|| {
+                eyre::eyre!(
+                    "hip4-poll requires a database. Specify --database-url, set DATABASE_URL env, \
+                     or add [storage].url to your config file."
+                )
+            })?;
+
+            let api_url = cfg.hip4.api_url.clone().ok_or_else(|| {
+                eyre::eyre!(
+                    "hip4-poll requires [hip4].api_url in your config file."
+                )
+            })?;
+
+            // Connect to storage backend
+            let db_storage: Arc<dyn storage::Storage> = if db_url.starts_with("sqlite:") {
+                let sqlite = storage::sqlite::SqliteStorage::connect(&db_url).await?;
+                sqlite.ensure_schema().await?;
+                Arc::new(sqlite)
+            } else if db_url.starts_with("http://") || db_url.starts_with("https://") {
+                let ch = storage::clickhouse::ClickHouseStorage::connect(&db_url).await?;
+                ch.ensure_schema().await?;
+                Arc::new(ch)
+            } else {
+                let pg = storage::postgres::PostgresStorage::connect(&db_url).await?;
+                pg.ensure_schema().await?;
+                Arc::new(pg)
+            };
+
+            let api_client = hip4::api::HyperCoreApiClient::new(&api_url);
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+            // Spawn shutdown signal handler
+            tokio::spawn(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                info!("[HIP4-POLL] Shutting down...");
+                let _ = shutdown_tx.send(true);
+            });
+
+            hip4::poller::run_hip4_poller(api_client, db_storage, &cfg.hip4, shutdown_rx).await?;
         }
 
         Commands::Live {
@@ -489,6 +573,7 @@ backfill_workers = 64
                     &live_config,
                     &cfg.pipeline,
                     &cfg.storage,
+                    &cfg.hip4,
                     chain_id,
                     &network_name,
                     start_block,
@@ -501,6 +586,7 @@ backfill_workers = 64
                     &live_config,
                     &cfg.pipeline,
                     &cfg.storage,
+                    &cfg.hip4,
                     chain_id,
                     &network_name,
                 )

@@ -12,6 +12,24 @@ pub struct Config {
     pub pipeline: PipelineConfig,
     #[serde(default)]
     pub live: LiveConfig,
+    #[serde(default)]
+    pub hip4: Hip4Config,
+}
+
+#[derive(Debug, Default, Deserialize, Clone)]
+pub struct Hip4Config {
+    /// Enable HIP4 contest event decoding (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+    /// Contest contract address (e.g. "0x4fd772e5708da2a7f097f51b3127e515a72744bd")
+    pub contest_address: Option<String>,
+    /// HyperCore API URL for market metadata and prices (Phase 2).
+    /// When set, the API poller is activated.
+    pub api_url: Option<String>,
+    /// How often to poll outcomeMeta (seconds, default: 60)
+    pub meta_poll_interval_s: Option<u64>,
+    /// How often to poll allMids for prices (seconds, default: 5)
+    pub price_poll_interval_s: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -376,6 +394,85 @@ backfill_workers = 32
         assert!((config.live.poll_decay - 0.5).abs() < f64::EPSILON);
         assert_eq!(config.live.gap_threshold, 200);
         assert_eq!(config.live.backfill_workers, 32);
+    }
+
+    #[test]
+    fn hip4_config_defaults() {
+        let config = Hip4Config::default();
+        assert!(!config.enabled);
+        assert!(config.contest_address.is_none());
+        assert!(config.api_url.is_none());
+        assert!(config.meta_poll_interval_s.is_none());
+        assert!(config.price_poll_interval_s.is_none());
+    }
+
+    #[test]
+    fn parse_toml_with_hip4_section() {
+        let toml = r#"
+[network]
+name = "testnet"
+
+[hip4]
+enabled = true
+contest_address = "0x4fd772e5708da2a7f097f51b3127e515a72744bd"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.hip4.enabled);
+        assert_eq!(
+            config.hip4.contest_address.as_deref(),
+            Some("0x4fd772e5708da2a7f097f51b3127e515a72744bd")
+        );
+    }
+
+    #[test]
+    fn parse_toml_with_hip4_phase2_fields() {
+        let toml = r#"
+[network]
+name = "testnet"
+
+[hip4]
+enabled = true
+contest_address = "0x4fd772e5708da2a7f097f51b3127e515a72744bd"
+api_url = "https://api.hyperliquid-testnet.xyz/info"
+meta_poll_interval_s = 120
+price_poll_interval_s = 10
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.hip4.enabled);
+        assert_eq!(
+            config.hip4.api_url.as_deref(),
+            Some("https://api.hyperliquid-testnet.xyz/info")
+        );
+        assert_eq!(config.hip4.meta_poll_interval_s, Some(120));
+        assert_eq!(config.hip4.price_poll_interval_s, Some(10));
+    }
+
+    #[test]
+    fn parse_toml_hip4_without_phase2_fields_uses_none() {
+        let toml = r#"
+[hip4]
+enabled = true
+contest_address = "0xabc"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.hip4.enabled);
+        assert!(config.hip4.api_url.is_none());
+        assert!(config.hip4.meta_poll_interval_s.is_none());
+        assert!(config.hip4.price_poll_interval_s.is_none());
+    }
+
+    #[test]
+    fn parse_toml_without_hip4_section_uses_defaults() {
+        let toml = r#"
+[network]
+name = "mainnet"
+
+[storage]
+url = "sqlite:./data.db"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.hip4.enabled);
+        assert!(config.hip4.contest_address.is_none());
     }
 
     #[test]

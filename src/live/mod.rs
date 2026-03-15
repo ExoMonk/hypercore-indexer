@@ -6,9 +6,12 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::config::{LiveConfig, PipelineConfig, StorageConfig};
+use crate::config::{Hip4Config, LiveConfig, PipelineConfig, StorageConfig};
 use crate::decode;
 use crate::error::Result;
+use crate::hip4;
+use crate::hip4::api::HyperCoreApiClient;
+use crate::hip4::poller::run_hip4_poller;
 use crate::pipeline::range::{RangeConfig, RangeFetcher};
 use crate::s3::client::HyperEvmS3Client;
 use crate::s3::codec;
@@ -28,15 +31,20 @@ pub(crate) fn is_block_not_found(err: &eyre::Report) -> bool {
 /// 1. Detect gaps and backfill via parallel S3 fetch if far behind.
 /// 2. Follow the tip sequentially with adaptive polling.
 /// 3. Graceful shutdown on Ctrl+C.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_live(
     s3_client: Arc<HyperEvmS3Client>,
     storage: Box<dyn Storage>,
     live_config: &LiveConfig,
     pipeline_config: &PipelineConfig,
     storage_config: &StorageConfig,
+    hip4_config: &Hip4Config,
     chain_id: u64,
     network: &str,
 ) -> Result<()> {
+    // Wrap storage in Arc so it can be shared with the HIP4 poller
+    let storage: Arc<dyn Storage> = Arc::from(storage);
+
     // Get current cursor from DB
     let mut cursor = storage
         .get_cursor(network)
@@ -63,6 +71,7 @@ pub async fn run_live(
         live_config,
         pipeline_config,
         storage_config,
+        hip4_config,
         chain_id,
         network,
         cursor,
@@ -70,6 +79,22 @@ pub async fn run_live(
     .await?;
 
     info!("[LIVE] Caught up. Following tip...");
+
+    // Spawn HIP4 API poller if api_url is configured
+    let (poller_shutdown_tx, poller_shutdown_rx) = tokio::sync::watch::channel(false);
+    let poller_handle = if hip4_config.api_url.is_some() {
+        let api_url = hip4_config.api_url.as_deref().unwrap();
+        let api_client = HyperCoreApiClient::new(api_url);
+        let poller_storage = Arc::clone(&storage);
+        let poller_config = hip4_config.clone();
+        Some(tokio::spawn(async move {
+            if let Err(e) = run_hip4_poller(api_client, poller_storage, &poller_config, poller_shutdown_rx).await {
+                warn!("[LIVE] HIP4 poller exited with error: {e}");
+            }
+        }))
+    } else {
+        None
+    };
 
     // Register Ctrl+C handler once (not per-iteration)
     let shutdown = tokio::signal::ctrl_c();
@@ -89,6 +114,7 @@ pub async fn run_live(
                 live_config,
                 pipeline_config,
                 storage_config,
+                hip4_config,
                 chain_id,
                 network,
                 &mut cursor,
@@ -105,6 +131,12 @@ pub async fn run_live(
         }
     }
 
+    // Signal the poller to stop and wait for it
+    let _ = poller_shutdown_tx.send(true);
+    if let Some(handle) = poller_handle {
+        let _ = handle.await;
+    }
+
     Ok(())
 }
 
@@ -117,6 +149,7 @@ pub async fn run_live_from(
     live_config: &LiveConfig,
     pipeline_config: &PipelineConfig,
     storage_config: &StorageConfig,
+    hip4_config: &Hip4Config,
     chain_id: u64,
     network: &str,
     from: u64,
@@ -135,6 +168,7 @@ pub async fn run_live_from(
         live_config,
         pipeline_config,
         storage_config,
+        hip4_config,
         chain_id,
         network,
     )
@@ -150,6 +184,7 @@ async fn detect_and_backfill_gap(
     live_config: &LiveConfig,
     pipeline_config: &PipelineConfig,
     storage_config: &StorageConfig,
+    hip4_config: &Hip4Config,
     chain_id: u64,
     network: &str,
     cursor: u64,
@@ -198,6 +233,7 @@ async fn detect_and_backfill_gap(
 
     let batch_size = storage_config.batch_size;
     let mut buffer: Vec<decode::types::DecodedBlock> = Vec::with_capacity(batch_size);
+    let mut hip4_buffer: Vec<hip4::types::Hip4BlockData> = Vec::with_capacity(batch_size);
     let mut count = 0u64;
 
     // Track contiguous frontier to avoid advancing cursor past gaps.
@@ -209,6 +245,13 @@ async fn detect_and_backfill_gap(
     while let Some((_block_num, raw_block)) = rx.recv().await {
         let decoded = decode::decode_block(&raw_block, chain_id)?;
         let block_num = decoded.number;
+
+        // Process HIP4 data from the decoded block
+        if hip4_config.enabled {
+            let hip4_data = hip4::process_block(&decoded, hip4_config);
+            hip4_buffer.push(hip4_data);
+        }
+
         buffer.push(decoded);
         count += 1;
 
@@ -223,6 +266,14 @@ async fn detect_and_backfill_gap(
             storage
                 .insert_batch_and_set_cursor(&buffer, network, contiguous_cursor)
                 .await?;
+
+            // Insert HIP4 data — failure is logged but does not kill the batch
+            for hip4_data in &hip4_buffer {
+                if let Err(e) = storage.insert_hip4_data(hip4_data).await {
+                    warn!("[LIVE] Failed to insert HIP4 data in backfill batch: {e}");
+                }
+            }
+
             info!(
                 batch_blocks = buffer.len(),
                 cursor = contiguous_cursor,
@@ -230,6 +281,7 @@ async fn detect_and_backfill_gap(
                 "[LIVE] Backfill batch flushed"
             );
             buffer.clear();
+            hip4_buffer.clear();
         }
     }
 
@@ -238,6 +290,14 @@ async fn detect_and_backfill_gap(
         storage
             .insert_batch_and_set_cursor(&buffer, network, contiguous_cursor)
             .await?;
+
+        // Insert remaining HIP4 data — failure is logged but does not kill the batch
+        for hip4_data in &hip4_buffer {
+            if let Err(e) = storage.insert_hip4_data(hip4_data).await {
+                warn!("[LIVE] Failed to insert HIP4 data in final backfill batch: {e}");
+            }
+        }
+
         info!(
             batch_blocks = buffer.len(),
             cursor = contiguous_cursor,
@@ -260,6 +320,7 @@ async fn follow_tip_step(
     live_config: &LiveConfig,
     pipeline_config: &PipelineConfig,
     storage_config: &StorageConfig,
+    hip4_config: &Hip4Config,
     chain_id: u64,
     network: &str,
     cursor: &mut u64,
@@ -282,9 +343,24 @@ async fn follow_tip_step(
             let tx_count = decoded.transactions.len();
             let system_count = decoded.system_transfers.len();
 
+            // Process HIP4 data before consuming decoded
+            let hip4_data = if hip4_config.enabled {
+                Some(hip4::process_block(&decoded, hip4_config))
+            } else {
+                None
+            };
+
             storage
                 .insert_batch_and_set_cursor(&[decoded], network, next_block)
                 .await?;
+
+            // Insert HIP4 data AFTER block data — HIP4 failure must not block block storage.
+            // If this fails, the block is still stored; HIP4 will be retried on reprocess.
+            if let Some(hip4_data) = &hip4_data {
+                if let Err(e) = storage.insert_hip4_data(hip4_data).await {
+                    warn!("[LIVE] Failed to insert HIP4 data for block {next_block}: {e}");
+                }
+            }
 
             *cursor = next_block;
             interval.reset();
@@ -308,6 +384,7 @@ async fn follow_tip_step(
                         ..*pipeline_config
                     },
                     storage_config,
+                    hip4_config,
                     chain_id,
                     network,
                     *cursor,
@@ -335,9 +412,23 @@ async fn follow_tip_step(
                             let tx_count = decoded.transactions.len();
                             let system_count = decoded.system_transfers.len();
 
+                            // Process HIP4 data before consuming decoded
+                            let hip4_data = if hip4_config.enabled {
+                                Some(hip4::process_block(&decoded, hip4_config))
+                            } else {
+                                None
+                            };
+
                             storage
                                 .insert_batch_and_set_cursor(&[decoded], network, next_block)
                                 .await?;
+
+                            // Insert HIP4 data AFTER block — failure must not block block storage
+                            if let Some(hip4_data) = &hip4_data {
+                                if let Err(e) = storage.insert_hip4_data(hip4_data).await {
+                                    warn!("[LIVE] Failed to insert HIP4 data for block {next_block} (retry {attempt}): {e}");
+                                }
+                            }
 
                             *cursor = next_block;
                             interval.reset();

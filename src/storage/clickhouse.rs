@@ -3,6 +3,7 @@ use serde::Serialize;
 use tracing::info;
 
 use crate::decode::types::{AssetType, DecodedBlock, TxType};
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
 
 use super::Storage;
 
@@ -58,6 +59,43 @@ const SCHEMA_SQL: &[&str] = &[
         data            String
     ) ENGINE = ReplacingMergeTree()
     ORDER BY (block_number, tx_index, log_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_deposits (
+        block_number    UInt64,
+        tx_index        UInt32,
+        log_index       UInt32,
+        contest_id      UInt64,
+        side_id         UInt64,
+        depositor       String,
+        amount_wei      String
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (block_number, tx_index, log_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_claims (
+        block_number    UInt64,
+        tx_index        UInt32,
+        log_index       UInt32,
+        contest_id      UInt64,
+        side_id         UInt64,
+        claimer         String,
+        amount_wei      String
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (block_number, tx_index, log_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_markets (
+        outcome_id      UInt32,
+        name            String,
+        description     String,
+        side_specs      String,
+        question_id     Nullable(UInt32),
+        question_name   Nullable(String),
+        updated_at      DateTime DEFAULT now()
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY outcome_id",
+    "CREATE TABLE IF NOT EXISTS hip4_prices (
+        coin            String,
+        mid_price       String,
+        timestamp       DateTime64(3),
+        _dummy          UInt8 DEFAULT 0
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (coin, timestamp)",
     "CREATE TABLE IF NOT EXISTS indexer_cursor (
         network         String,
         last_block      UInt64,
@@ -121,6 +159,46 @@ struct EventLogRow {
     topic2: String,
     topic3: String,
     data: String,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4DepositRow {
+    block_number: u64,
+    tx_index: u32,
+    log_index: u32,
+    contest_id: u64,
+    side_id: u64,
+    depositor: String,
+    amount_wei: String,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4ClaimRow {
+    block_number: u64,
+    tx_index: u32,
+    log_index: u32,
+    contest_id: u64,
+    side_id: u64,
+    claimer: String,
+    amount_wei: String,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4MarketRow {
+    outcome_id: u32,
+    name: String,
+    description: String,
+    side_specs: String,
+    question_id: Option<u32>,
+    question_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4PriceChRow {
+    coin: String,
+    mid_price: String,
+    #[serde(with = "clickhouse::serde::time::datetime64::millis")]
+    timestamp: time::OffsetDateTime,
 }
 
 #[derive(Debug, Serialize, clickhouse::Row)]
@@ -304,6 +382,136 @@ impl ClickHouseStorage {
         Ok(())
     }
 
+    async fn insert_hip4_deposits_ch(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.deposits.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4DepositRow>("hip4_deposits")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_deposits inserter: {e}"))?;
+
+        for d in &data.deposits {
+            insert
+                .write(&Hip4DepositRow {
+                    block_number: d.block_number,
+                    tx_index: d.tx_index as u32,
+                    log_index: d.log_index as u32,
+                    contest_id: d.contest_id,
+                    side_id: d.side_id,
+                    depositor: to_hex(d.depositor.as_slice()),
+                    amount_wei: d.amount_wei.to_string(),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_deposit row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_deposits insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn insert_hip4_claims_ch(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.claims.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4ClaimRow>("hip4_claims")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_claims inserter: {e}"))?;
+
+        for c in &data.claims {
+            insert
+                .write(&Hip4ClaimRow {
+                    block_number: c.block_number,
+                    tx_index: c.tx_index as u32,
+                    log_index: c.log_index as u32,
+                    contest_id: c.contest_id,
+                    side_id: c.side_id,
+                    claimer: to_hex(c.claimer.as_slice()),
+                    amount_wei: c.amount_wei.to_string(),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_claim row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_claims insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn upsert_hip4_markets_ch(&self, markets: &[Hip4Market]) -> eyre::Result<()> {
+        if markets.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4MarketRow>("hip4_markets")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_markets inserter: {e}"))?;
+
+        for m in markets {
+            insert
+                .write(&Hip4MarketRow {
+                    outcome_id: m.outcome_id as u32,
+                    name: m.name.clone(),
+                    description: m.description.clone(),
+                    side_specs: m.side_specs.clone(),
+                    question_id: m.question_id.map(|v| v as u32),
+                    question_name: m.question_name.clone(),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_market row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_markets insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn insert_hip4_prices_ch(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
+        if prices.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4PriceChRow>("hip4_prices")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_prices inserter: {e}"))?;
+
+        for p in prices {
+            let ts = time::OffsetDateTime::from_unix_timestamp_nanos(p.timestamp_ms as i128 * 1_000_000)
+                .map_err(|e| eyre::eyre!("Invalid timestamp_ms {}: {e}", p.timestamp_ms))?;
+
+            insert
+                .write(&Hip4PriceChRow {
+                    coin: p.coin.clone(),
+                    mid_price: p.mid_price.clone(),
+                    timestamp: ts,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_price row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_prices insert: {e}"))?;
+        Ok(())
+    }
+
     async fn insert_system_transfers(&self, blocks: &[DecodedBlock]) -> eyre::Result<()> {
         let total: usize = blocks.iter().map(|b| b.system_transfers.len()).sum();
         if total == 0 {
@@ -409,5 +617,19 @@ impl Storage for ClickHouseStorage {
             .await
             .map_err(|e| eyre::eyre!("Failed to flush cursor: {e}"))?;
         Ok(())
+    }
+
+    async fn insert_hip4_data(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        self.insert_hip4_deposits_ch(data).await?;
+        self.insert_hip4_claims_ch(data).await?;
+        Ok(())
+    }
+
+    async fn upsert_hip4_markets(&self, markets: &[Hip4Market]) -> eyre::Result<()> {
+        self.upsert_hip4_markets_ch(markets).await
+    }
+
+    async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
+        self.insert_hip4_prices_ch(prices).await
     }
 }

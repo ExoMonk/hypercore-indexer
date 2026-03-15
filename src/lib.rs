@@ -1,6 +1,7 @@
 pub mod config;
 pub mod decode;
 pub mod error;
+pub mod hip4;
 pub mod live;
 pub mod pipeline;
 pub mod s3;

@@ -4,6 +4,7 @@ use std::str::FromStr;
 use tracing::info;
 
 use crate::decode::types::{DecodedBlock, DecodedTx};
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
 
 use super::postgres::{asset_type_to_db, tx_type_to_smallint};
 use super::Storage;
@@ -76,6 +77,52 @@ CREATE TABLE IF NOT EXISTS event_logs (
 
 CREATE INDEX IF NOT EXISTS idx_event_logs_address_topic0 ON event_logs (address, topic0);
 CREATE INDEX IF NOT EXISTS idx_event_logs_topic0 ON event_logs (topic0);
+
+CREATE TABLE IF NOT EXISTS hip4_deposits (
+    block_number    INTEGER NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    log_index       INTEGER NOT NULL,
+    contest_id      INTEGER NOT NULL,
+    side_id         INTEGER NOT NULL,
+    depositor       BLOB NOT NULL,
+    amount_wei      TEXT NOT NULL,
+    PRIMARY KEY (block_number, tx_index, log_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hip4_deposits_contest ON hip4_deposits (contest_id, side_id);
+CREATE INDEX IF NOT EXISTS idx_hip4_deposits_user ON hip4_deposits (depositor);
+
+CREATE TABLE IF NOT EXISTS hip4_claims (
+    block_number    INTEGER NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    log_index       INTEGER NOT NULL,
+    contest_id      INTEGER NOT NULL,
+    side_id         INTEGER NOT NULL,
+    claimer         BLOB NOT NULL,
+    amount_wei      TEXT NOT NULL,
+    PRIMARY KEY (block_number, tx_index, log_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hip4_claims_contest ON hip4_claims (contest_id, side_id);
+CREATE INDEX IF NOT EXISTS idx_hip4_claims_user ON hip4_claims (claimer);
+
+CREATE TABLE IF NOT EXISTS hip4_markets (
+    outcome_id      INTEGER NOT NULL PRIMARY KEY,
+    name            TEXT NOT NULL,
+    description     TEXT NOT NULL,
+    side_specs      TEXT NOT NULL,
+    question_id     INTEGER,
+    question_name   TEXT,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS hip4_prices (
+    coin            TEXT NOT NULL,
+    mid_price       TEXT NOT NULL,
+    timestamp       TEXT NOT NULL,
+    PRIMARY KEY (coin, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_prices_time ON hip4_prices (timestamp);
 
 CREATE TABLE IF NOT EXISTS indexer_cursor (
     network         TEXT PRIMARY KEY,
@@ -234,6 +281,131 @@ impl SqliteStorage {
         Ok(())
     }
 
+    async fn insert_hip4_deposits_in_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        data: &Hip4BlockData,
+    ) -> eyre::Result<()> {
+        for d in &data.deposits {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_deposits (block_number, tx_index, log_index, contest_id, side_id, depositor, amount_wei)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+            )
+            .bind(d.block_number as i64)
+            .bind(d.tx_index as i32)
+            .bind(d.log_index as i32)
+            .bind(d.contest_id as i64)
+            .bind(d.side_id as i64)
+            .bind(d.depositor.as_slice())
+            .bind(d.amount_wei.to_string())
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_deposit {}/{}/{}: {e}", d.block_number, d.tx_index, d.log_index))?;
+        }
+        Ok(())
+    }
+
+    async fn insert_hip4_claims_in_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        data: &Hip4BlockData,
+    ) -> eyre::Result<()> {
+        for c in &data.claims {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_claims (block_number, tx_index, log_index, contest_id, side_id, claimer, amount_wei)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+            )
+            .bind(c.block_number as i64)
+            .bind(c.tx_index as i32)
+            .bind(c.log_index as i32)
+            .bind(c.contest_id as i64)
+            .bind(c.side_id as i64)
+            .bind(c.claimer.as_slice())
+            .bind(c.amount_wei.to_string())
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_claim {}/{}/{}: {e}", c.block_number, c.tx_index, c.log_index))?;
+        }
+        Ok(())
+    }
+
+    async fn upsert_hip4_markets_sqlite(
+        pool: &SqlitePool,
+        markets: &[Hip4Market],
+    ) -> eyre::Result<()> {
+        if markets.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
+
+        for m in markets {
+            sqlx::query(
+                r#"INSERT INTO hip4_markets (outcome_id, name, description, side_specs, question_id, question_name, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                   ON CONFLICT (outcome_id) DO UPDATE SET
+                     name = excluded.name,
+                     description = excluded.description,
+                     side_specs = excluded.side_specs,
+                     question_id = excluded.question_id,
+                     question_name = excluded.question_name,
+                     updated_at = datetime('now')"#,
+            )
+            .bind(m.outcome_id as i64)
+            .bind(&m.name)
+            .bind(&m.description)
+            .bind(&m.side_specs)
+            .bind(m.question_id.map(|v| v as i64))
+            .bind(&m.question_name)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to upsert hip4_market {}: {e}", m.outcome_id))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to commit hip4_markets transaction: {e}"))?;
+
+        Ok(())
+    }
+
+    async fn insert_hip4_prices_sqlite(
+        pool: &SqlitePool,
+        prices: &[Hip4PriceRow],
+    ) -> eyre::Result<()> {
+        if prices.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
+
+        for p in prices {
+            // Store timestamp as ISO-8601 string for SQLite
+            let ts_secs = p.timestamp_ms / 1000;
+            let ts_str = format!("{ts_secs}");
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_prices (coin, mid_price, timestamp)
+                   VALUES (?, ?, datetime(?, 'unixepoch'))"#,
+            )
+            .bind(&p.coin)
+            .bind(&p.mid_price)
+            .bind(&ts_str)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_price {}: {e}", p.coin))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to commit hip4_prices transaction: {e}"))?;
+
+        Ok(())
+    }
+
     async fn set_cursor_in_tx(
         tx: &mut Transaction<'_, Sqlite>,
         network: &str,
@@ -331,5 +503,34 @@ impl Storage for SqliteStorage {
         .map_err(|e| eyre::eyre!("Failed to set cursor: {e}"))?;
 
         Ok(())
+    }
+
+    async fn insert_hip4_data(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.deposits.is_empty() && data.claims.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
+
+        Self::insert_hip4_deposits_in_tx(&mut tx, data).await?;
+        Self::insert_hip4_claims_in_tx(&mut tx, data).await?;
+
+        tx.commit()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to commit hip4 transaction: {e}"))?;
+
+        Ok(())
+    }
+
+    async fn upsert_hip4_markets(&self, markets: &[Hip4Market]) -> eyre::Result<()> {
+        Self::upsert_hip4_markets_sqlite(&self.pool, markets).await
+    }
+
+    async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
+        Self::insert_hip4_prices_sqlite(&self.pool, prices).await
     }
 }
