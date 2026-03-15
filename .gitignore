@@ -1,0 +1,7 @@
+/target
+tasks
+specs
+
+.env
+.claude
+CLAUDE.md
