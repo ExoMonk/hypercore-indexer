@@ -24,11 +24,41 @@ pub struct Hip4Claim {
     pub amount_wei: U256,
 }
 
+/// A decoded createContest call from transaction calldata.
+#[derive(Debug)]
+pub struct Hip4ContestCreated {
+    pub block_number: u64,
+    pub tx_index: usize,
+    pub contest_id: u64,
+    pub param2: u64,
+}
+
+/// A decoded refund call from transaction calldata.
+#[derive(Debug)]
+pub struct Hip4Refund {
+    pub block_number: u64,
+    pub tx_index: usize,
+    pub contest_id: u64,
+    pub side_id: u64,
+    pub user: Address,
+}
+
+/// A decoded sweepUnclaimed call from transaction calldata.
+#[derive(Debug)]
+pub struct Hip4SweepUnclaimed {
+    pub block_number: u64,
+    pub tx_index: usize,
+    pub contest_id: u64,
+}
+
 /// Aggregated HIP4 data extracted from a single block.
 #[derive(Debug, Default)]
 pub struct Hip4BlockData {
     pub deposits: Vec<Hip4Deposit>,
     pub claims: Vec<Hip4Claim>,
+    pub contest_creations: Vec<Hip4ContestCreated>,
+    pub refunds: Vec<Hip4Refund>,
+    pub sweeps: Vec<Hip4SweepUnclaimed>,
 }
 
 // --- Phase 2: API poller types ---

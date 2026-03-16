@@ -384,6 +384,111 @@ impl PostgresStorage {
         Ok(())
     }
 
+    /// Batch-insert HIP4 contest creations using UNNEST.
+    async fn insert_hip4_contest_creations(pool: &PgPool, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.contest_creations.is_empty() {
+            return Ok(());
+        }
+
+        let len = data.contest_creations.len();
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut tx_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut contest_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut param2s: Vec<i64> = Vec::with_capacity(len);
+
+        for c in &data.contest_creations {
+            block_numbers.push(c.block_number as i64);
+            tx_indexes.push(c.tx_index as i32);
+            contest_ids.push(c.contest_id as i64);
+            param2s.push(c.param2 as i64);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_contest_creations (block_number, tx_index, contest_id, param2)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::INTEGER[], $3::BIGINT[], $4::BIGINT[])
+               ON CONFLICT (block_number, tx_index) DO NOTHING"#,
+        )
+        .bind(&block_numbers)
+        .bind(&tx_indexes)
+        .bind(&contest_ids)
+        .bind(&param2s)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_contest_creations: {e}"))?;
+
+        Ok(())
+    }
+
+    /// Batch-insert HIP4 refunds using UNNEST.
+    async fn insert_hip4_refunds(pool: &PgPool, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.refunds.is_empty() {
+            return Ok(());
+        }
+
+        let len = data.refunds.len();
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut tx_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut contest_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut side_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut user_addresses: Vec<Vec<u8>> = Vec::with_capacity(len);
+
+        for r in &data.refunds {
+            block_numbers.push(r.block_number as i64);
+            tx_indexes.push(r.tx_index as i32);
+            contest_ids.push(r.contest_id as i64);
+            side_ids.push(r.side_id as i64);
+            user_addresses.push(r.user.as_slice().to_vec());
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_refunds (block_number, tx_index, contest_id, side_id, user_address)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::INTEGER[], $3::BIGINT[], $4::BIGINT[], $5::BYTEA[])
+               ON CONFLICT (block_number, tx_index) DO NOTHING"#,
+        )
+        .bind(&block_numbers)
+        .bind(&tx_indexes)
+        .bind(&contest_ids)
+        .bind(&side_ids)
+        .bind(&user_addresses)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_refunds: {e}"))?;
+
+        Ok(())
+    }
+
+    /// Batch-insert HIP4 sweeps using UNNEST.
+    async fn insert_hip4_sweeps(pool: &PgPool, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.sweeps.is_empty() {
+            return Ok(());
+        }
+
+        let len = data.sweeps.len();
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut tx_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut contest_ids: Vec<i64> = Vec::with_capacity(len);
+
+        for s in &data.sweeps {
+            block_numbers.push(s.block_number as i64);
+            tx_indexes.push(s.tx_index as i32);
+            contest_ids.push(s.contest_id as i64);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_sweeps (block_number, tx_index, contest_id)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::INTEGER[], $3::BIGINT[])
+               ON CONFLICT (block_number, tx_index) DO NOTHING"#,
+        )
+        .bind(&block_numbers)
+        .bind(&tx_indexes)
+        .bind(&contest_ids)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_sweeps: {e}"))?;
+
+        Ok(())
+    }
+
     /// Batch-upsert HIP4 markets using UNNEST.
     async fn upsert_hip4_markets_pg(pool: &PgPool, markets: &[Hip4Market]) -> eyre::Result<()> {
         if markets.is_empty() {
@@ -572,6 +677,9 @@ impl Storage for PostgresStorage {
     async fn insert_hip4_data(&self, data: &Hip4BlockData) -> eyre::Result<()> {
         Self::insert_hip4_deposits(&self.pool, data).await?;
         Self::insert_hip4_claims(&self.pool, data).await?;
+        Self::insert_hip4_contest_creations(&self.pool, data).await?;
+        Self::insert_hip4_refunds(&self.pool, data).await?;
+        Self::insert_hip4_sweeps(&self.pool, data).await?;
         Ok(())
     }
 

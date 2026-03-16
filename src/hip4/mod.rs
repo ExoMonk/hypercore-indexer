@@ -9,9 +9,11 @@ use crate::config::Hip4Config;
 use crate::decode::types::DecodedBlock;
 use types::Hip4BlockData;
 
-/// Process a decoded block and extract HIP4 contest events (deposits and claims).
+/// Process a decoded block and extract HIP4 contest events (deposits and claims)
+/// and contest function calls (createContest, refund, sweepUnclaimed).
 ///
-/// Scans all transaction logs from the configured contest address for known events.
+/// Scans all transaction logs from the configured contest address for known events,
+/// and transaction input calldata for known function selectors.
 /// Returns empty data if HIP4 is disabled or no contest address is configured.
 pub fn process_block(block: &DecodedBlock, config: &Hip4Config) -> Hip4BlockData {
     if !config.enabled {
@@ -37,6 +39,8 @@ pub fn process_block(block: &DecodedBlock, config: &Hip4Config) -> Hip4BlockData
         if !tx.success {
             continue;
         }
+
+        // Decode event logs (Deposit, Claimed)
         for log in &tx.logs {
             // Only process logs emitted by the contest contract
             if log.address != contest_addr {
@@ -47,6 +51,18 @@ pub fn process_block(block: &DecodedBlock, config: &Hip4Config) -> Hip4BlockData
                 data.deposits.push(deposit);
             } else if let Some(claim) = decoder::decode_claim(log, block.number, tx.tx_index) {
                 data.claims.push(claim);
+            }
+        }
+
+        // Decode calldata (createContest, refund, sweepUnclaimed)
+        // Only for transactions targeting the contest contract
+        if tx.to.as_ref() == Some(&contest_addr) {
+            if let Some(action) = decoder::decode_calldata(&tx.input, block.number, tx.tx_index) {
+                match action {
+                    decoder::Hip4Action::ContestCreated(c) => data.contest_creations.push(c),
+                    decoder::Hip4Action::Refund(r) => data.refunds.push(r),
+                    decoder::Hip4Action::SweepUnclaimed(s) => data.sweeps.push(s),
+                }
             }
         }
     }

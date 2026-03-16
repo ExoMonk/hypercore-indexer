@@ -107,6 +107,32 @@ CREATE TABLE IF NOT EXISTS hip4_claims (
 CREATE INDEX IF NOT EXISTS idx_hip4_claims_contest ON hip4_claims (contest_id, side_id);
 CREATE INDEX IF NOT EXISTS idx_hip4_claims_user ON hip4_claims (claimer);
 
+CREATE TABLE IF NOT EXISTS hip4_contest_creations (
+    block_number    INTEGER NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      INTEGER NOT NULL,
+    param2          INTEGER NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+
+CREATE TABLE IF NOT EXISTS hip4_refunds (
+    block_number    INTEGER NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      INTEGER NOT NULL,
+    side_id         INTEGER NOT NULL,
+    user_address    BLOB NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_refunds_contest ON hip4_refunds (contest_id, side_id);
+CREATE INDEX IF NOT EXISTS idx_hip4_refunds_user ON hip4_refunds (user_address);
+
+CREATE TABLE IF NOT EXISTS hip4_sweeps (
+    block_number    INTEGER NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      INTEGER NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+
 CREATE TABLE IF NOT EXISTS hip4_markets (
     outcome_id      INTEGER NOT NULL PRIMARY KEY,
     name            TEXT NOT NULL,
@@ -376,6 +402,66 @@ impl SqliteStorage {
         Ok(())
     }
 
+    async fn insert_hip4_contest_creations_in_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        data: &Hip4BlockData,
+    ) -> eyre::Result<()> {
+        for c in &data.contest_creations {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_contest_creations (block_number, tx_index, contest_id, param2)
+                   VALUES (?, ?, ?, ?)"#,
+            )
+            .bind(c.block_number as i64)
+            .bind(c.tx_index as i32)
+            .bind(c.contest_id as i64)
+            .bind(c.param2 as i64)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_contest_creation {}/{}: {e}", c.block_number, c.tx_index))?;
+        }
+        Ok(())
+    }
+
+    async fn insert_hip4_refunds_in_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        data: &Hip4BlockData,
+    ) -> eyre::Result<()> {
+        for r in &data.refunds {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_refunds (block_number, tx_index, contest_id, side_id, user_address)
+                   VALUES (?, ?, ?, ?, ?)"#,
+            )
+            .bind(r.block_number as i64)
+            .bind(r.tx_index as i32)
+            .bind(r.contest_id as i64)
+            .bind(r.side_id as i64)
+            .bind(r.user.as_slice())
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_refund {}/{}: {e}", r.block_number, r.tx_index))?;
+        }
+        Ok(())
+    }
+
+    async fn insert_hip4_sweeps_in_tx(
+        tx: &mut Transaction<'_, Sqlite>,
+        data: &Hip4BlockData,
+    ) -> eyre::Result<()> {
+        for s in &data.sweeps {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_sweeps (block_number, tx_index, contest_id)
+                   VALUES (?, ?, ?)"#,
+            )
+            .bind(s.block_number as i64)
+            .bind(s.tx_index as i32)
+            .bind(s.contest_id as i64)
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_sweep {}/{}: {e}", s.block_number, s.tx_index))?;
+        }
+        Ok(())
+    }
+
     async fn upsert_hip4_markets_sqlite(
         pool: &SqlitePool,
         markets: &[Hip4Market],
@@ -555,7 +641,12 @@ impl Storage for SqliteStorage {
     }
 
     async fn insert_hip4_data(&self, data: &Hip4BlockData) -> eyre::Result<()> {
-        if data.deposits.is_empty() && data.claims.is_empty() {
+        if data.deposits.is_empty()
+            && data.claims.is_empty()
+            && data.contest_creations.is_empty()
+            && data.refunds.is_empty()
+            && data.sweeps.is_empty()
+        {
             return Ok(());
         }
 
@@ -567,6 +658,9 @@ impl Storage for SqliteStorage {
 
         Self::insert_hip4_deposits_in_tx(&mut tx, data).await?;
         Self::insert_hip4_claims_in_tx(&mut tx, data).await?;
+        Self::insert_hip4_contest_creations_in_tx(&mut tx, data).await?;
+        Self::insert_hip4_refunds_in_tx(&mut tx, data).await?;
+        Self::insert_hip4_sweeps_in_tx(&mut tx, data).await?;
 
         tx.commit()
             .await

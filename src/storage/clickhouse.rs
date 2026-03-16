@@ -80,6 +80,27 @@ const SCHEMA_SQL: &[&str] = &[
         amount_wei      String
     ) ENGINE = ReplacingMergeTree()
     ORDER BY (block_number, tx_index, log_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_contest_creations (
+        block_number    UInt64,
+        tx_index        UInt32,
+        contest_id      UInt64,
+        param2          UInt64
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (block_number, tx_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_refunds (
+        block_number    UInt64,
+        tx_index        UInt32,
+        contest_id      UInt64,
+        side_id         UInt64,
+        user_address    String
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (block_number, tx_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_sweeps (
+        block_number    UInt64,
+        tx_index        UInt32,
+        contest_id      UInt64
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (block_number, tx_index)",
     "CREATE TABLE IF NOT EXISTS hip4_markets (
         outcome_id      UInt32,
         name            String,
@@ -220,6 +241,30 @@ struct Hip4ClaimRow {
     side_id: u64,
     claimer: String,
     amount_wei: String,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4ContestCreationRow {
+    block_number: u64,
+    tx_index: u32,
+    contest_id: u64,
+    param2: u64,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4RefundRow {
+    block_number: u64,
+    tx_index: u32,
+    contest_id: u64,
+    side_id: u64,
+    user_address: String,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4SweepRow {
+    block_number: u64,
+    tx_index: u32,
+    contest_id: u64,
 }
 
 #[derive(Debug, Serialize, clickhouse::Row)]
@@ -530,6 +575,96 @@ impl ClickHouseStorage {
         Ok(())
     }
 
+    async fn insert_hip4_contest_creations_ch(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.contest_creations.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4ContestCreationRow>("hip4_contest_creations")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_contest_creations inserter: {e}"))?;
+
+        for c in &data.contest_creations {
+            insert
+                .write(&Hip4ContestCreationRow {
+                    block_number: c.block_number,
+                    tx_index: c.tx_index as u32,
+                    contest_id: c.contest_id,
+                    param2: c.param2,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_contest_creation row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_contest_creations insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn insert_hip4_refunds_ch(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.refunds.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4RefundRow>("hip4_refunds")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_refunds inserter: {e}"))?;
+
+        for r in &data.refunds {
+            insert
+                .write(&Hip4RefundRow {
+                    block_number: r.block_number,
+                    tx_index: r.tx_index as u32,
+                    contest_id: r.contest_id,
+                    side_id: r.side_id,
+                    user_address: to_hex(r.user.as_slice()),
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_refund row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_refunds insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn insert_hip4_sweeps_ch(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.sweeps.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4SweepRow>("hip4_sweeps")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_sweeps inserter: {e}"))?;
+
+        for s in &data.sweeps {
+            insert
+                .write(&Hip4SweepRow {
+                    block_number: s.block_number,
+                    tx_index: s.tx_index as u32,
+                    contest_id: s.contest_id,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_sweep row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_sweeps insert: {e}"))?;
+        Ok(())
+    }
+
     async fn upsert_hip4_markets_ch(&self, markets: &[Hip4Market]) -> eyre::Result<()> {
         if markets.is_empty() {
             return Ok(());
@@ -704,6 +839,9 @@ impl Storage for ClickHouseStorage {
     async fn insert_hip4_data(&self, data: &Hip4BlockData) -> eyre::Result<()> {
         self.insert_hip4_deposits_ch(data).await?;
         self.insert_hip4_claims_ch(data).await?;
+        self.insert_hip4_contest_creations_ch(data).await?;
+        self.insert_hip4_refunds_ch(data).await?;
+        self.insert_hip4_sweeps_ch(data).await?;
         Ok(())
     }
 
