@@ -79,15 +79,16 @@ enum Commands {
         target_network: String,
     },
 
-    /// Backfill a range of blocks from S3
+    /// Backfill a range of blocks from S3. If --to is omitted, backfills to the
+    /// S3 tip and then switches to live mode automatically.
     Backfill {
         /// Start block number (if omitted, resumes from cursor)
         #[arg(long)]
         from: Option<u64>,
 
-        /// End block number (required)
+        /// End block number (if omitted, backfills to tip then switches to live)
         #[arg(long)]
-        to: u64,
+        to: Option<u64>,
 
         /// Number of concurrent workers (default: 64)
         #[arg(long, default_value = "64")]
@@ -393,9 +394,21 @@ enabled = false
                 }))
             };
 
+            // If --to is omitted, discover S3 tip and plan to transition to live after
+            let transition_to_live = to.is_none();
+            let end_block = match to {
+                Some(t) => t,
+                None => {
+                    info!("No --to specified, discovering S3 tip...");
+                    let tip = live::tip::find_s3_tip(&client, start_block).await?;
+                    info!(tip, "Backfilling to tip, then switching to live mode");
+                    tip
+                }
+            };
+
             let config = RangeConfig {
                 start_block,
-                end_block: to,
+                end_block,
                 workers: effective_workers,
                 channel_size: cfg.pipeline.channel_size,
                 retry_attempts: cfg.pipeline.retry_attempts,
@@ -498,6 +511,43 @@ enabled = false
             }
 
             info!(total_received = count, "Backfill complete");
+
+            // If --to was omitted, transition to live mode
+            if transition_to_live {
+                if let Some(ref effective_db_url) = effective_db_url {
+                    info!("[LIVE] Transitioning from backfill to live mode...");
+
+                    let live_region = cfg.network.region.clone();
+                    let live_client = Arc::new(
+                        HyperEvmS3Client::new(Some(live_region), network).await?,
+                    );
+
+                    let live_storage: Box<dyn storage::Storage> = if effective_db_url.starts_with("sqlite:") {
+                        let s = storage::sqlite::SqliteStorage::connect(effective_db_url).await?;
+                        Box::new(s)
+                    } else if effective_db_url.starts_with("http://") || effective_db_url.starts_with("https://") {
+                        let c = storage::clickhouse::ClickHouseStorage::connect(effective_db_url).await?;
+                        Box::new(c)
+                    } else {
+                        let p = storage::postgres::PostgresStorage::connect(effective_db_url).await?;
+                        Box::new(p)
+                    };
+
+                    live::run_live(
+                        live_client,
+                        live_storage,
+                        &cfg.live,
+                        &cfg.pipeline,
+                        &cfg.storage,
+                        &cfg.hip4,
+                        chain_id,
+                        &network_name,
+                    )
+                    .await?;
+                } else {
+                    info!("Backfill complete. No storage configured — cannot transition to live mode.");
+                }
+            }
         }
 
         Commands::Hip4Poll { database_url } => {

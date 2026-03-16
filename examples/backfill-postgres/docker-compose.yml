@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hypercore
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  indexer:
+    image: ghcr.io/exomonk/hypercore-indexer:latest
+    # Or build locally: uncomment below and comment out image above
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./hypercore.toml:/app/hypercore.toml
+    environment:
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_REGION=ap-northeast-1
+    command: ["backfill", "--from", "5000000", "--to", "5001000"]
+
+volumes:
+  pgdata:

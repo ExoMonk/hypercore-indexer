@@ -20,6 +20,28 @@ Built for HIP4 prediction market indexing. Testnet live now -- when HIP4 goes ma
 | `hip4_trades` | HIP4-specific fills mirrored from `fills` (`#`-prefixed coins) |
 | `indexer_cursor` | Resume position per network |
 
+## Installation
+
+**Docker (pre-built):**
+```bash
+docker pull ghcr.io/exomonk/hypercore-indexer:latest
+docker run --rm ghcr.io/exomonk/hypercore-indexer --help
+```
+
+**Docker (build locally):**
+```bash
+docker build -t hypercore-indexer .
+docker run --rm hypercore-indexer --help
+```
+
+**From source:**
+```bash
+cargo install --path .
+hypercore-indexer init
+```
+
+**Examples:** See [`examples/live-sqlite/`](examples/live-sqlite/) (zero dependencies) and [`examples/backfill-postgres/`](examples/backfill-postgres/) (Docker Compose).
+
 ## Quick Start
 
 ```bash
@@ -273,6 +295,6 @@ Full backfill costs about the price of a coffee. Ongoing indexing is negligible.
 
 ## Requirements
 
-- Rust 1.75+
+- Rust 1.91+
 - AWS credentials configured (S3 bucket is requester-pays, region `ap-northeast-1`)
 - Docker (optional, for PostgreSQL dev environment via `make dev`)

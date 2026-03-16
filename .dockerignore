@@ -1,0 +1,14 @@
+target
+.git
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+tasks
+specs
+.claude
+CLAUDE.md
+examples
+tests
+deployments/hypercore-indexer-test
