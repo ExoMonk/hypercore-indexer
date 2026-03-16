@@ -1,75 +1,24 @@
 # hypercore-indexer
 
-Blazing-fast Rust indexer for Hyperliquid's HyperCore EVM. Ingests block data directly from S3 at **450 blocks/sec** (remote) or **~5,000 blocks/sec** (same-region EC2), decodes transactions with dual phantom hash computation, and stores everything in PostgreSQL, SQLite, or ClickHouse.
+Blazing-fast Rust indexer for Hyperliquid's HyperCore EVM. Ingests block data directly from S3 at **450 blocks/sec** (remote) or **~5,000 blocks/sec** (same-region EC2), decodes transactions with dual phantom hash computation, and stores everything in SQLite, PostgreSQL, or ClickHouse.
 
-Built for HIP4 outcome contract indexing (prediction markets) when it hits mainnet. Testnet indexing available now.
+Built for HIP4 prediction market indexing. Testnet live now -- when HIP4 goes mainnet, one config change enables everything.
 
-## Performance
+## What Gets Indexed
 
-### Remote benchmarks (MacBook → `ap-northeast-1`)
-
-| Pipeline | Workers | Throughput | 10k blocks |
-|----------|---------|-----------|------------|
-| S3 fetch + decode | 128 | 308 blocks/sec | 32s |
-| S3 fetch + decode | 256 | 388 blocks/sec | 25s |
-| S3 + decode + **PostgreSQL** | 256 | **388 blocks/sec** | 25s |
-| S3 + decode (no storage) | 512 | **450 blocks/sec** | 22s |
-
-Storage adds **near-zero overhead** — UNNEST batch inserts (5 SQL statements per 100 blocks) complete faster than a single S3 round-trip.
-
-### Worker scaling
-
-| Workers | Blocks/sec | Notes |
-|---------|-----------|-------|
-| 64 | 130 | Conservative default |
-| 128 | 308 | Good for remote |
-| 256 | 388 | Recommended remote |
-| **512** | **450** | **Sweet spot (remote)** |
-| 1024 | 444 | Plateau — TCP overhead |
-| 2048 | 433 | Diminishing returns |
-
-### Where the time goes
-
-```
-S3 GET round-trip:   ~1.1s per request  ← 99% of wall time
-LZ4 decompress:       <1ms/block
-MessagePack decode:    <1ms/block
-RLP + keccak256 hash:  <1ms/block
-PostgreSQL insert:     <1ms/block
-```
-
-The indexer is **S3-latency-limited, not compute-limited**. Each block is a separate 2-4KB S3 object — there's no multi-object GET or batch download API. Throughput = `workers_in_flight / avg_round_trip`.
-
-### Deployment recommendation
-
-**Run the initial backfill from EC2 in `ap-northeast-1`** (same region as the S3 bucket). This cuts RTT from ~1.1s to ~10ms:
-
-| Location | RTT | 512 workers | Time for 30M blocks |
-|----------|-----|-------------|---------------------|
-| Remote (US/EU) | ~1.1s | 450 blocks/sec | ~18 hours |
-| **EC2 ap-northeast-1** | ~10ms | ~5,000 blocks/sec* | ~1.7 hours |
-
-*Limited by S3 rate limit of 5,500 GETs/sec per prefix.
-
-Once caught up, incremental indexing from anywhere keeps pace easily — Hyperliquid produces ~1 block/sec.
-
-### vs coredrain (TypeScript reference)
-
-| | coredrain | hypercore-indexer |
-|---|-----------|-------------------|
-| Language | TypeScript (Bun) | Rust (tokio) |
-| S3 throughput | ~370 blocks/sec | **450 blocks/sec** |
-| Hash computation | JS + viem | Native RLP + keccak256 |
-| Storage | MongoDB (row-by-row) | PostgreSQL/ClickHouse (UNNEST batch) |
-| Full pipeline | S3 → match only | S3 → decode → hash → store |
-
-hypercore-indexer is faster while doing strictly more work (full decode + hash computation + storage).
-
-## Why
-
-- **S3-native**: Hyperliquid publishes block data to S3 as LZ4+MessagePack, not via RPC. Standard EVM indexers (rindexer, Ponder, etc.) can't ingest this format. hypercore-indexer reads it natively.
-- **Dual phantom hashes**: System transactions (HyperCore-to-HyperEVM bridge) have two valid transaction hashes depending on who computed them. We store both so lookups work against the official RPC and block explorers.
-- **Parallel ingestion**: Configurable worker pool (up to 512 concurrent S3 fetches) with backpressure, exponential retry, and cursor-based resume. Crash-safe with atomic batch writes.
+| Table | Contents |
+|-------|----------|
+| `blocks` | Block number, hash, parent hash, timestamp, gas used/limit, tx counts |
+| `transactions` | Computed tx hash, type (Legacy/Eip1559/Eip2930), to, value, gas, success |
+| `system_transfers` | Dual hashes (official + explorer), system address, asset type, recipient, amount |
+| `event_logs` | Contract address, topic0-3, log data |
+| `fills` | Every perp/spot/commodity/HIP4 trade fill on Hyperliquid |
+| `hip4_deposits` | Decoded Deposit events from HIP4 contest contract |
+| `hip4_claims` | Decoded Claimed events from HIP4 contest contract |
+| `hip4_markets` | Market metadata from `outcomeMeta` API (name, description, sides) |
+| `hip4_prices` | Mid-price snapshots for `#`-prefixed prediction market coins |
+| `hip4_trades` | HIP4-specific fills mirrored from `fills` (`#`-prefixed coins) |
+| `indexer_cursor` | Resume position per network |
 
 ## Quick Start
 
@@ -96,36 +45,47 @@ make query
 ## Commands
 
 ```bash
-hypercore-indexer init                          # Generate hypercore.toml
-hypercore-indexer fetch-block <N>               # Fetch + decode a single block
-hypercore-indexer decode-block <N>              # Full decode with hash computation
-hypercore-indexer backfill --from <N> --to <N>  # Parallel S3 ingestion + storage
+hypercore-indexer init                                     # Generate hypercore.toml
+hypercore-indexer fetch-block <N>                          # Fetch + decode a single block (--raw, --system-txs)
+hypercore-indexer decode-block <N>                         # Full decode with hash computation
+hypercore-indexer backfill --from <N> --to <N>             # Parallel S3 ingestion + storage
+hypercore-indexer live                                     # Follow chain tip, index new blocks continuously
+hypercore-indexer fills-backfill --from-date YYYYMMDD --to-date YYYYMMDD   # Backfill trade fills from S3
+hypercore-indexer hip4-poll                                # Run HIP4 API poller (markets + prices)
 ```
 
 Global flags: `--network testnet|mainnet`, `--config <path>`, `--region <aws-region>`
 
-Resume is automatic — omit `--from` and the indexer picks up from the last cursor.
+Resume is automatic -- omit `--from` and the indexer picks up from the last cursor.
 
 ## Config
 
-Generated by `init`, lives at `hypercore.toml`:
+Generated by `init`, lives at `hypercore.toml`. See `hypercore.example.toml` for a complete annotated example.
 
-```toml
-[network]
-name = "mainnet"           # or "testnet" for HIP4
+CLI flags and `DATABASE_URL` / `HL_NETWORK` env vars override config values. Credentials support env var references: `url = "postgres://${PGUSER}:${PGPASSWORD}@host/db"`.
 
-[storage]
-url = "sqlite:./hypercore.db"
-batch_size = 100
+### Sections
 
-[pipeline]
-workers = 64               # increase to 256 for max throughput
-channel_size = 1024
-retry_attempts = 3
-retry_delay_ms = 1000
-```
+| Section | Purpose | Required |
+|---------|---------|----------|
+| `[network]` | Chain (mainnet/testnet) and AWS region | Yes |
+| `[storage]` | Database URL and batch size | Yes |
+| `[pipeline]` | S3 fetch concurrency, retries, channel sizing | Yes |
+| `[live]` | Adaptive polling for `live` mode (intervals, gap detection, backfill workers) | No -- defaults work well |
+| `[hip4]` | HIP4 prediction market decoding and API polling | No -- disabled by default |
+| `[fills]` | Trade fills ingestion from S3 node data | No -- disabled by default |
 
-CLI flags and `DATABASE_URL` / `HL_NETWORK` env vars override config values. Credentials can use env var references: `url = "postgres://${PGUSER}:${PGPASSWORD}@host/db"`.
+**`[network]`** -- Which chain to index. Use `testnet` for HIP4 development (chain 998), `mainnet` for production (chain 999).
+
+**`[storage]`** -- Database connection. Backend is auto-detected from the URL prefix. `batch_size` controls how many blocks are buffered before flushing (default: 100).
+
+**`[pipeline]`** -- Tuning knobs for the S3 fetch pipeline. `workers` is the most impactful setting -- increase to 256-512 for maximum throughput on remote connections. `channel_size` sets backpressure. `retry_attempts` and `retry_delay_ms` control exponential backoff on S3 failures.
+
+**`[live]`** -- Controls how `live` mode tracks the chain tip. Adaptive polling adjusts the interval based on whether new blocks are found. `gap_threshold` triggers parallel backfill when the indexer falls behind. Defaults are tuned for Hyperliquid's ~1 block/sec cadence.
+
+**`[hip4]`** -- Enable prediction market indexing. Set `enabled = true` and provide the `contest_address` to decode deposit/claim events from the contest contract. Add `api_url` to activate the market metadata and price poller. See [HIP4 Prediction Markets](#hip4-prediction-markets).
+
+**`[fills]`** -- Enable trade fills ingestion. When `enabled = true`, the `fills-backfill` and `live` commands ingest trade data from S3. `mirror_hip4 = true` (default) automatically copies `#`-prefixed fills to the `hip4_trades` table. See [Trade Fills](#trade-fills).
 
 ## Storage
 
@@ -139,15 +99,49 @@ Three backends, same `Storage` trait. Auto-detected from the URL:
 
 All backends use batch inserts, idempotent writes (`ON CONFLICT DO NOTHING` / `ReplacingMergeTree`), and atomic cursor updates.
 
-## What Gets Indexed
+## HIP4 Prediction Markets
 
-| Table | Contents |
-|-------|----------|
-| `blocks` | Block number, hash, parent hash, timestamp, gas used/limit, tx counts |
-| `transactions` | Computed tx hash, type (Legacy/Eip1559/Eip2930), to, value, gas, success |
-| `system_transfers` | Dual hashes (official + explorer), system address, asset type, recipient, amount |
-| `event_logs` | Contract address, topic0-3, log data |
-| `indexer_cursor` | Resume position per network |
+HIP4 is Hyperliquid's binary prediction market system. Markets trade on the HyperCore L1 order book (perps with `#`-prefixed coin names like `#90`), while deposits, claims, and refunds happen on the HyperEVM contest contract.
+
+hypercore-indexer captures both layers:
+
+| Data | Source | Table |
+|------|--------|-------|
+| Contest deposits | HyperEVM event logs (Deposit event) | `hip4_deposits` |
+| Contest claims/refunds | HyperEVM event logs (Claimed event) | `hip4_claims` |
+| Market metadata | HyperCore `outcomeMeta` API | `hip4_markets` |
+| Price snapshots | HyperCore `allMids` API (# coins) | `hip4_prices` |
+| Trade fills | S3 `node_fills` / mirrored from `fills` | `hip4_trades` |
+
+**Status**: HIP4 is live on testnet. When it launches on mainnet, change `[network] name = "mainnet"` and update the `contest_address` -- everything else works automatically.
+
+**Enable HIP4**:
+
+```toml
+[hip4]
+enabled = true
+contest_address = "0x4fd772e5708da2a7f097f51b3127e515a72744bd"
+api_url = "https://api.hyperliquid-testnet.xyz/info"
+```
+
+**Standalone poller**: Run `hip4-poll` to poll market metadata and prices without running the full indexer pipeline. Useful for keeping `hip4_markets` and `hip4_prices` up to date independently.
+
+## Trade Fills
+
+The `fills-backfill` command ingests all Hyperliquid trade history from S3 `node_fills` data. Every perp, spot, commodity, and HIP4 trade is stored in the `fills` table.
+
+```bash
+# Backfill all trades for a date range
+hypercore-indexer fills-backfill --from-date 20260301 --to-date 20260315
+```
+
+When `[fills] mirror_hip4 = true` (the default), fills with `#`-prefixed coins (HIP4 prediction markets) are automatically mirrored to the `hip4_trades` table. When HIP4 goes mainnet, prediction market trade data appears in `hip4_trades` with zero additional configuration.
+
+## Why
+
+- **S3-native**: Hyperliquid publishes block data to S3 as LZ4+MessagePack, not via RPC. Standard EVM indexers (rindexer, Ponder, etc.) can't ingest this format. hypercore-indexer reads it natively.
+- **Dual phantom hashes**: System transactions (HyperCore-to-HyperEVM bridge) have two valid transaction hashes depending on who computed them. We store both so lookups work against the official RPC and block explorers.
+- **Parallel ingestion**: Configurable worker pool (up to 512 concurrent S3 fetches) with backpressure, exponential retry, and cursor-based resume. Crash-safe with atomic batch writes.
 
 ## Architecture
 
@@ -155,23 +149,93 @@ All backends use batch inserts, idempotent writes (`ON CONFLICT DO NOTHING` / `R
 S3 (hl-mainnet-evm-blocks)
   |  LZ4 + MessagePack, requester-pays
   v
-Fetch Workers (tokio, semaphore-bounded, 64-256 concurrent)
+Fetch Workers (tokio, semaphore-bounded, 64-512 concurrent)
   |  bounded channel with backpressure
   v
 Decode (custom serde deserializers)
   |  RLP encode + keccak256 for tx hashes
   |  dual phantom hash for system txs
+  |  HIP4 event decoding (when enabled)
   v
 Batch Insert (UNNEST for Postgres, native for ClickHouse)
   |  100 blocks per batch, atomic with cursor
   v
-Storage (PostgreSQL / SQLite / ClickHouse)
+Storage (SQLite / PostgreSQL / ClickHouse)
+
+S3 (hl-mainnet-node-data)             HyperCore API
+  |  node_fills (JSONL + LZ4)           |  outcomeMeta, allMids
+  v                                      v
+Fills Pipeline                         HIP4 API Poller
+  |  fills + hip4_trades mirror          |  hip4_markets + hip4_prices
+  v                                      v
+Storage                                Storage
 ```
 
 Key design choices:
-- **Custom serde** instead of reth types — the S3 MessagePack format has quirks (camelCase fields, positional signatures, string tx_type) that don't match reth's serde
-- **Contiguous cursor** — tracks the highest block where all preceding blocks are complete, not just the max seen. Safe to resume after crashes.
-- **rustls everywhere** — no OpenSSL dependency. AWS SDK, sqlx, and clickhouse crate all use rustls.
+- **Custom serde** instead of reth types -- the S3 MessagePack format has quirks (camelCase fields, positional signatures, string tx_type) that don't match reth's serde
+- **Contiguous cursor** -- tracks the highest block where all preceding blocks are complete, not just the max seen. Safe to resume after crashes.
+- **rustls everywhere** -- no OpenSSL dependency. AWS SDK, sqlx, and clickhouse crate all use rustls.
+
+## Performance
+
+### Remote benchmarks (MacBook to `ap-northeast-1`)
+
+| Pipeline | Workers | Throughput | 10k blocks |
+|----------|---------|-----------|------------|
+| S3 fetch + decode | 128 | 308 blocks/sec | 32s |
+| S3 fetch + decode | 256 | 388 blocks/sec | 25s |
+| S3 + decode + **PostgreSQL** | 256 | **388 blocks/sec** | 25s |
+| S3 + decode (no storage) | 512 | **450 blocks/sec** | 22s |
+
+Storage adds **near-zero overhead** -- UNNEST batch inserts (5 SQL statements per 100 blocks) complete faster than a single S3 round-trip.
+
+### Worker scaling
+
+| Workers | Blocks/sec | Notes |
+|---------|-----------|-------|
+| 64 | 130 | Conservative default |
+| 128 | 308 | Good for remote |
+| 256 | 388 | Recommended remote |
+| **512** | **450** | **Sweet spot (remote)** |
+| 1024 | 444 | Plateau -- TCP overhead |
+| 2048 | 433 | Diminishing returns |
+
+### Where the time goes
+
+```
+S3 GET round-trip:   ~1.1s per request  <- 99% of wall time
+LZ4 decompress:       <1ms/block
+MessagePack decode:    <1ms/block
+RLP + keccak256 hash:  <1ms/block
+PostgreSQL insert:     <1ms/block
+```
+
+The indexer is **S3-latency-limited, not compute-limited**. Each block is a separate 2-4KB S3 object -- there's no multi-object GET or batch download API. Throughput = `workers_in_flight / avg_round_trip`.
+
+### Deployment recommendation
+
+**Run the initial backfill from EC2 in `ap-northeast-1`** (same region as the S3 bucket). This cuts RTT from ~1.1s to ~10ms:
+
+| Location | RTT | 512 workers | Time for 30M blocks |
+|----------|-----|-------------|---------------------|
+| Remote (US/EU) | ~1.1s | 450 blocks/sec | ~18 hours |
+| **EC2 ap-northeast-1** | ~10ms | ~5,000 blocks/sec* | ~1.7 hours |
+
+*Limited by S3 rate limit of 5,500 GETs/sec per prefix.
+
+Once caught up, incremental indexing from anywhere keeps pace easily -- Hyperliquid produces ~1 block/sec.
+
+### vs coredrain (TypeScript reference)
+
+| | coredrain | hypercore-indexer |
+|---|-----------|-------------------|
+| Language | TypeScript (Bun) | Rust (tokio) |
+| S3 throughput | ~370 blocks/sec | **450 blocks/sec** |
+| Hash computation | JS + viem | Native RLP + keccak256 |
+| Storage | MongoDB (row-by-row) | PostgreSQL/ClickHouse (UNNEST batch) |
+| Full pipeline | S3 -> match only | S3 -> decode -> hash -> store |
+
+hypercore-indexer is faster while doing strictly more work (full decode + hash computation + storage).
 
 ## Networks
 
@@ -185,7 +249,7 @@ Key design choices:
 
 ## Cost
 
-The S3 bucket is **requester-pays** — you pay for GET requests and data transfer. Pricing is based on `ap-northeast-1` rates.
+The S3 bucket is **requester-pays** -- you pay for GET requests and data transfer. Pricing is based on `ap-northeast-1` rates.
 
 ### Full backfill (~30M blocks, ~27GB)
 

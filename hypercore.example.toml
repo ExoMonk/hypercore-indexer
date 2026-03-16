@@ -7,13 +7,34 @@ name = "mainnet"              # "mainnet" (chain 999) or "testnet" (chain 998, H
 region = "ap-northeast-1"     # AWS region for S3 bucket
 
 [storage]
-# backend = "postgres"        # "postgres" or "sqlite" (auto-detected from url)
+# backend = "postgres"        # "postgres", "sqlite", or "clickhouse" (auto-detected from url)
 # url = "postgres://postgres:postgres@localhost:5432/hypercore"
 # url = "sqlite:./hypercore.db"
+# url = "http://localhost:8123"                  # ClickHouse
+# url = "postgres://${PGUSER}:${PGPASSWORD}@localhost:5432/hypercore"  # env var refs
 batch_size = 100               # blocks buffered before flushing to DB
 
 [pipeline]
-workers = 64                   # concurrent S3 fetch workers
+workers = 64                   # concurrent S3 fetch workers (increase to 256-512 for max throughput)
 channel_size = 1024            # bounded channel capacity (backpressure)
 retry_attempts = 3             # max retries per failed S3 fetch
 retry_delay_ms = 1000          # base retry delay (exponential backoff)
+
+[live]
+poll_interval_ms = 1000        # base poll interval (~1s block time)
+min_poll_interval_ms = 200     # minimum poll interval floor
+poll_decay = 0.67              # decay factor for adaptive backoff
+gap_threshold = 100            # blocks behind tip before triggering parallel backfill
+backfill_workers = 64          # concurrent workers for gap backfill
+
+[hip4]
+enabled = false                # enable HIP4 prediction market decoding
+# contest_address = "0x4fd772e5708da2a7f097f51b3127e515a72744bd"  # HIP4 contest contract
+# api_url = "https://api.hyperliquid-testnet.xyz/info"            # HyperCore API for markets + prices
+# meta_poll_interval_s = 60    # how often to poll outcomeMeta (seconds)
+# price_poll_interval_s = 5    # how often to poll allMids for prices (seconds)
+
+[fills]
+enabled = false                # enable trade fills ingestion
+# bucket = "hl-mainnet-node-data"   # S3 bucket for node fills data
+# mirror_hip4 = true           # mirror #-prefixed fills to hip4_trades table

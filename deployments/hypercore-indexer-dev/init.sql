@@ -94,6 +94,32 @@ CREATE TABLE IF NOT EXISTS hip4_claims (
 CREATE INDEX IF NOT EXISTS idx_hip4_claims_contest ON hip4_claims (contest_id, side_id);
 CREATE INDEX IF NOT EXISTS idx_hip4_claims_user ON hip4_claims (claimer);
 
+CREATE TABLE IF NOT EXISTS hip4_contest_creations (
+    block_number    BIGINT NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      BIGINT NOT NULL,
+    param2          BIGINT NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+
+CREATE TABLE IF NOT EXISTS hip4_refunds (
+    block_number    BIGINT NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      BIGINT NOT NULL,
+    side_id         BIGINT NOT NULL,
+    user_address    BYTEA NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_refunds_contest ON hip4_refunds (contest_id, side_id);
+CREATE INDEX IF NOT EXISTS idx_hip4_refunds_user ON hip4_refunds (user_address);
+
+CREATE TABLE IF NOT EXISTS hip4_sweeps (
+    block_number    BIGINT NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      BIGINT NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+
 CREATE TABLE IF NOT EXISTS hip4_markets (
     outcome_id      INTEGER NOT NULL,
     name            TEXT NOT NULL,
