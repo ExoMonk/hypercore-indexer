@@ -48,8 +48,8 @@ fn block_1_is_completely_empty() {
     assert_eq!(block.block.inner().body.transactions.len(), 0);
     assert_eq!(block.system_txs.len(), 0);
     assert_eq!(block.receipts.len(), 0);
-    assert!(block.read_precompile_calls.is_empty());
-    assert!(block.highest_precompile_address.is_none());
+    // read_precompile_calls and highest_precompile_address are ignored during deserialization
+    // (they exist for MessagePack compat but their format changes across HL versions)
 }
 
 #[test]

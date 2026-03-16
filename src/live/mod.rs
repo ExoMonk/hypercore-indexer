@@ -2,6 +2,7 @@ pub mod poll;
 pub mod tip;
 
 use std::collections::BTreeSet;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use tracing::{debug, info, warn};
@@ -53,8 +54,21 @@ pub async fn run_live(
         }
         None => {
             info!("[LIVE] No cursor found, discovering chain tip...");
-            let known = tip::find_existing_block(&s3_client).await?;
-            let tip = tip::find_s3_tip(&s3_client, known).await?;
+            // Use RPC for instant tip discovery, fall back to S3 probing
+            let rpc_url = crate::s3::client::Network::from_str(network)
+                .unwrap_or_default()
+                .rpc_url();
+            let tip = match tip::get_rpc_tip(rpc_url).await {
+                Ok(t) => {
+                    info!(tip = t, "[LIVE] Chain tip from RPC");
+                    t
+                }
+                Err(e) => {
+                    warn!("[LIVE] RPC tip failed ({e}), falling back to S3 probing...");
+                    let known = tip::find_existing_block(&s3_client).await?;
+                    tip::find_s3_tip(&s3_client, known).await?
+                }
+            };
             let initial = tip.saturating_sub(1);
             storage.set_cursor(network, initial).await?;
             info!("[LIVE] Starting from chain tip (block {})", tip);

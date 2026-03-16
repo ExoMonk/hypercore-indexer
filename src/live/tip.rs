@@ -6,17 +6,51 @@ use crate::error::Result;
 use crate::live::is_block_not_found;
 use crate::s3::client::HyperEvmS3Client;
 
-/// Find a block that exists on S3 by probing common starting points.
-/// Needed because testnet starts at ~18M while mainnet starts at 0.
+/// Get the current chain tip via RPC (eth_blockNumber).
+/// Single HTTP request — instant compared to S3 probing.
+pub async fn get_rpc_tip(rpc_url: &str) -> Result<u64> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(rpc_url)
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "eth_blockNumber",
+            "params": [],
+            "id": 1
+        }))
+        .send()
+        .await
+        .map_err(|e| eyre::eyre!("RPC request failed: {e}"))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| eyre::eyre!("RPC response parse failed: {e}"))?;
+
+    let hex = body["result"]
+        .as_str()
+        .ok_or_else(|| eyre::eyre!("RPC response missing 'result': {body}"))?;
+
+    let tip = u64::from_str_radix(hex.trim_start_matches("0x"), 16)
+        .map_err(|e| eyre::eyre!("Invalid block number '{hex}': {e}"))?;
+
+    debug!(tip, rpc_url, "Chain tip from RPC");
+    Ok(tip)
+}
+
+/// Fallback: find a high block on S3 by probing common starting points.
 pub async fn find_existing_block(client: &Arc<HyperEvmS3Client>) -> Result<u64> {
-    let probes = [1u64, 1_000_000, 10_000_000, 18_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000];
+    let probes = [
+        50_000_000, 40_000_000, 30_000_000, 25_000_000, 20_000_000,
+        18_000_000, 10_000_000, 1_000_000, 1,
+    ];
     for probe in probes {
         if block_exists(client, probe).await.unwrap_or(false) {
             debug!(block = probe, "Found existing block on S3");
             return Ok(probe);
         }
     }
-    Err(eyre::eyre!("Could not find any existing block on S3. Check your network config and AWS credentials."))
+    Err(eyre::eyre!("Could not find any existing block on S3"))
 }
 
 /// Find the approximate latest block available on S3 via exponential probing + binary search.

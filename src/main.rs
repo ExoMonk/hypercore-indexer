@@ -360,9 +360,15 @@ enabled = false
                             }
                             None => {
                                 // No cursor — discover tip and start from there
-                                info!("No cursor found, discovering S3 tip to start from current chain head...");
-                                let known = live::tip::find_existing_block(&client).await?;
-                                let tip = live::tip::find_s3_tip(&client, known).await?;
+                                info!("No cursor found, discovering chain tip...");
+                                let rpc_url = network.rpc_url();
+                                let tip = match live::tip::get_rpc_tip(rpc_url).await {
+                                    Ok(t) => t,
+                                    Err(_) => {
+                                        let known = live::tip::find_existing_block(&client).await?;
+                                        live::tip::find_s3_tip(&client, known).await?
+                                    }
+                                };
                                 info!(tip, "Starting from chain tip");
                                 tip
                             }
@@ -378,9 +384,15 @@ enabled = false
                             Some(cursor) => cursor + 1,
                             None => {
                                 // No cursor — discover tip
-                                info!("No cursor found, discovering S3 tip to start from current chain head...");
-                                let known = live::tip::find_existing_block(&client).await?;
-                                let tip = live::tip::find_s3_tip(&client, known).await?;
+                                info!("No cursor found, discovering chain tip...");
+                                let rpc_url = network.rpc_url();
+                                let tip = match live::tip::get_rpc_tip(rpc_url).await {
+                                    Ok(t) => t,
+                                    Err(_) => {
+                                        let known = live::tip::find_existing_block(&client).await?;
+                                        live::tip::find_s3_tip(&client, known).await?
+                                    }
+                                };
                                 info!(tip, "Starting from chain tip");
                                 tip
                             }
@@ -404,8 +416,12 @@ enabled = false
             let end_block = match to {
                 Some(t) => t,
                 None => {
-                    info!("No --to specified, discovering S3 tip...");
-                    let tip = live::tip::find_s3_tip(&client, start_block).await?;
+                    info!("No --to specified, discovering chain tip...");
+                    let rpc_url = network.rpc_url();
+                    let tip = match live::tip::get_rpc_tip(rpc_url).await {
+                        Ok(t) => t,
+                        Err(_) => live::tip::find_s3_tip(&client, start_block).await?,
+                    };
                     info!(tip, "Backfilling to tip, then switching to live mode");
                     tip
                 }

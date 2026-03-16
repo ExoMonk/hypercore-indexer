@@ -8,14 +8,15 @@ pub struct BlockAndReceipts {
     pub receipts: Vec<TransactionReceipt>,
     #[serde(default)]
     pub system_txs: Vec<SystemTx>,
-    /// Required for MessagePack deserialization compatibility.
-    #[serde(default)]
+    /// MessagePack compat — field format changes across Hyperliquid versions.
+    /// We never read this, so skip whatever type it is.
+    #[serde(default, deserialize_with = "deserialize_ignored")]
     #[allow(dead_code)]
-    pub read_precompile_calls: Vec<serde_json::Value>,
-    /// Required for MessagePack deserialization compatibility.
-    #[serde(default)]
+    pub read_precompile_calls: (),
+    /// MessagePack compat — may be absent in older blocks.
+    #[serde(default, deserialize_with = "deserialize_ignored")]
     #[allow(dead_code)]
-    pub highest_precompile_address: Option<Address>,
+    pub highest_precompile_address: (),
 }
 
 /// Tagged enum — always "Reth115" variant containing a SealedBlock-like structure.
@@ -690,6 +691,17 @@ where
     }
 
     deserializer.deserialize_any(TxTypeVisitor)
+}
+
+/// Skip any MessagePack value without caring about its type.
+/// Used for fields we need for serde compatibility but never read.
+/// Handles bytes, arrays, maps, strings, integers — anything.
+fn deserialize_ignored<'de, D>(deserializer: D) -> Result<(), D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde::de::IgnoredAny::deserialize(deserializer)?;
+    Ok(())
 }
 
 /// Wire format deserializer correctness:
