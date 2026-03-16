@@ -6,6 +6,19 @@ use crate::error::Result;
 use crate::live::is_block_not_found;
 use crate::s3::client::HyperEvmS3Client;
 
+/// Find a block that exists on S3 by probing common starting points.
+/// Needed because testnet starts at ~18M while mainnet starts at 0.
+pub async fn find_existing_block(client: &Arc<HyperEvmS3Client>) -> Result<u64> {
+    let probes = [1u64, 1_000_000, 10_000_000, 18_000_000, 20_000_000, 30_000_000, 40_000_000, 50_000_000];
+    for probe in probes {
+        if block_exists(client, probe).await.unwrap_or(false) {
+            debug!(block = probe, "Found existing block on S3");
+            return Ok(probe);
+        }
+    }
+    Err(eyre::eyre!("Could not find any existing block on S3. Check your network config and AWS credentials."))
+}
+
 /// Find the approximate latest block available on S3 via exponential probing + binary search.
 ///
 /// Algorithm:

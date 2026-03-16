@@ -361,7 +361,8 @@ enabled = false
                             None => {
                                 // No cursor — discover tip and start from there
                                 info!("No cursor found, discovering S3 tip to start from current chain head...");
-                                let tip = live::tip::find_s3_tip(&client, 1).await?;
+                                let known = live::tip::find_existing_block(&client).await?;
+                                let tip = live::tip::find_s3_tip(&client, known).await?;
                                 info!(tip, "Starting from chain tip");
                                 tip
                             }
@@ -378,7 +379,8 @@ enabled = false
                             None => {
                                 // No cursor — discover tip
                                 info!("No cursor found, discovering S3 tip to start from current chain head...");
-                                let tip = live::tip::find_s3_tip(&client, 1).await?;
+                                let known = live::tip::find_existing_block(&client).await?;
+                                let tip = live::tip::find_s3_tip(&client, known).await?;
                                 info!(tip, "Starting from chain tip");
                                 tip
                             }

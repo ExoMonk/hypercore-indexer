@@ -138,7 +138,15 @@ impl HyperEvmS3Client {
             .request_payer(aws_sdk_s3::types::RequestPayer::Requester)
             .send()
             .await
-            .map_err(|e| eyre::eyre!("S3 GetObject failed for key {key}: {e}"))?;
+            .map_err(|e| {
+                // Use Debug format to capture the full error chain including NoSuchKey
+                let detail = format!("{e:?}");
+                if detail.contains("NoSuchKey") || detail.contains("NoSuchBucket") || detail.contains("404") || detail.contains("not found") || detail.contains("The specified key does not exist") {
+                    eyre::eyre!("S3 block not found: {key} (NoSuchKey)")
+                } else {
+                    eyre::eyre!("S3 fetch error: {key}: {e}")
+                }
+            })?;
 
         let bytes = resp
             .body

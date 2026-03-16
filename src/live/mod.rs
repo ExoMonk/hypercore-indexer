@@ -53,8 +53,8 @@ pub async fn run_live(
         }
         None => {
             info!("[LIVE] No cursor found, discovering chain tip...");
-            let tip = tip::find_s3_tip(&s3_client, 1).await?;
-            // Set cursor to tip-1 so the loop starts by fetching `tip`
+            let known = tip::find_existing_block(&s3_client).await?;
+            let tip = tip::find_s3_tip(&s3_client, known).await?;
             let initial = tip.saturating_sub(1);
             storage.set_cursor(network, initial).await?;
             info!("[LIVE] Starting from chain tip (block {})", tip);

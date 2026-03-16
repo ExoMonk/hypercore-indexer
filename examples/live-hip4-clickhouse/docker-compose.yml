@@ -20,7 +20,8 @@ services:
         hard: 262144
 
   indexer:
-    image: ghcr.io/exomonk/hypercore-indexer:latest
+    image: hypercore-indexer:latest
+    # Or use GHCR: ghcr.io/exomonk/hypercore-indexer:latest
     depends_on:
       clickhouse:
         condition: service_healthy
