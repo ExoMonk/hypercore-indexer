@@ -4,105 +4,6 @@ Blazing-fast Rust indexer for Hyperliquid's HyperCore EVM. Ingests block data di
 
 Built for HIP4 prediction market indexing. Testnet live now -- when HIP4 goes mainnet, one config change enables everything.
 
-## Data Model
-
-### Core (EVM blocks from S3)
-
-```
-blocks
-├── block_number (PK)
-├── block_hash, parent_hash
-├── timestamp, gas_used, gas_limit, base_fee_per_gas
-└── tx_count, system_tx_count
-
-transactions
-├── block_number, tx_index (PK)
-├── tx_hash                          ← computed via RLP + keccak256
-├── tx_type (Legacy/Eip2930/Eip1559)
-├── from, to, value, input
-├── gas_limit, gas_used, success
-└── FK → blocks
-
-event_logs
-├── block_number, tx_index, log_index (PK)
-├── address, topic0..topic3, data
-└── FK → transactions
-
-system_transfers
-├── block_number, tx_index (PK)
-├── official_hash, explorer_hash     ← dual phantom hashes
-├── system_address, asset_type, asset_index
-├── recipient, amount_wei
-└── FK → blocks
-```
-
-### Trade Fills (from S3 `node_fills_by_block`)
-
-```
-fills
-├── trade_id, user_address (PK)
-├── block_number, block_time
-├── coin                              ← "BTC", "ETH", "@230", "#90"
-├── price, size, side, direction
-├── closed_pnl, fee, fee_token
-└── fill_time
-
-hip4_trades                           ← mirror of fills where coin starts with #
-└── same schema as fills
-```
-
-### HIP4 Prediction Markets
-
-```
-hip4_deposits                         ← decoded from EVM Deposit events
-├── block_number, tx_index, log_index (PK)
-├── contest_id, side_id
-├── depositor, amount_wei
-└── FK → event_logs
-
-hip4_claims                           ← decoded from EVM Claimed events
-├── same structure as hip4_deposits
-└── claimer, amount_wei
-
-hip4_contest_creations                ← decoded from createContest() calls
-├── block_number, tx_index (PK)
-└── contest_id, param2
-
-hip4_refunds                          ← decoded from refund() calls
-├── block_number, tx_index (PK)
-└── contest_id, side_id, user_address
-
-hip4_sweeps                           ← decoded from sweepUnclaimed() calls
-├── block_number, tx_index (PK)
-└── contest_id
-
-hip4_markets                          ← polled from outcomeMeta API
-├── outcome_id (PK)
-├── name, description, side_specs (JSON)
-└── question_id, question_name
-
-hip4_prices                           ← polled from allMids API
-├── coin, timestamp (PK)              ← "#90", "#91", "#11760"
-└── mid_price                         ← 0.0 to 1.0 (implied probability)
-
-indexer_cursor
-├── network (PK)                      ← "mainnet" or "testnet"
-└── last_block, updated_at
-```
-
-### Data Flow
-
-```
-S3 EVM blocks ──→ blocks → transactions → event_logs → system_transfers
-                                       └→ hip4_deposits, hip4_claims (decoded)
-                                       └→ hip4_contest_creations, hip4_refunds, hip4_sweeps
-
-S3 node_fills ──→ fills ──→ hip4_trades (# coins mirrored)
-
-HyperCore API ──→ hip4_markets (metadata)
-               └→ hip4_prices (implied probability snapshots)
-```
-
 ## Installation
 
 ### Docker (recommended)
@@ -132,14 +33,16 @@ docker run --rm \
 Requires Rust 1.91+:
 
 ```bash
-# Option 1: install script (builds + generates config)
-curl -sSL https://raw.githubusercontent.com/ExoMonk/hypercore-indexer/main/install.sh | bash
-
-# Option 2: manual
 git clone https://github.com/ExoMonk/hypercore-indexer.git
 cd hypercore-indexer
 cargo install --path .
 hypercore-indexer init
+```
+
+Or use the install script:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/ExoMonk/hypercore-indexer/main/install.sh | bash
 ```
 
 After installation, `hypercore-indexer` is available as a CLI:
@@ -357,18 +260,6 @@ The indexer is **S3-latency-limited, not compute-limited**. Each block is a sepa
 
 Once caught up, incremental indexing from anywhere keeps pace easily -- Hyperliquid produces ~1 block/sec.
 
-### vs coredrain (TypeScript reference)
-
-| | coredrain | hypercore-indexer |
-|---|-----------|-------------------|
-| Language | TypeScript (Bun) | Rust (tokio) |
-| S3 throughput | ~370 blocks/sec | **450 blocks/sec** |
-| Hash computation | JS + viem | Native RLP + keccak256 |
-| Storage | MongoDB (row-by-row) | PostgreSQL/ClickHouse (UNNEST batch) |
-| Full pipeline | S3 -> match only | S3 -> decode -> hash -> store |
-
-hypercore-indexer is faster while doing strictly more work (full decode + hash computation + storage).
-
 ## Networks
 
 | | Mainnet | Testnet |
@@ -408,3 +299,103 @@ Full backfill costs about the price of a coffee. Ongoing indexing is negligible.
 - Rust 1.91+
 - AWS credentials configured (S3 bucket is requester-pays, region `ap-northeast-1`)
 - Docker (optional, for PostgreSQL dev environment via `make dev`)
+
+
+## Data Model
+
+### Core (EVM blocks from S3)
+
+```
+blocks
+├── block_number (PK)
+├── block_hash, parent_hash
+├── timestamp, gas_used, gas_limit, base_fee_per_gas
+└── tx_count, system_tx_count
+
+transactions
+├── block_number, tx_index (PK)
+├── tx_hash                          ← computed via RLP + keccak256
+├── tx_type (Legacy/Eip2930/Eip1559)
+├── from, to, value, input
+├── gas_limit, gas_used, success
+└── FK → blocks
+
+event_logs
+├── block_number, tx_index, log_index (PK)
+├── address, topic0..topic3, data
+└── FK → transactions
+
+system_transfers
+├── block_number, tx_index (PK)
+├── official_hash, explorer_hash     ← dual phantom hashes
+├── system_address, asset_type, asset_index
+├── recipient, amount_wei
+└── FK → blocks
+```
+
+### Trade Fills (from S3 `node_fills_by_block`)
+
+```
+fills
+├── trade_id, user_address (PK)
+├── block_number, block_time
+├── coin                              ← "BTC", "ETH", "@230", "#90"
+├── price, size, side, direction
+├── closed_pnl, fee, fee_token
+└── fill_time
+
+hip4_trades                           ← mirror of fills where coin starts with #
+└── same schema as fills
+```
+
+### HIP4 Prediction Markets
+
+```
+hip4_deposits                         ← decoded from EVM Deposit events
+├── block_number, tx_index, log_index (PK)
+├── contest_id, side_id
+├── depositor, amount_wei
+└── FK → event_logs
+
+hip4_claims                           ← decoded from EVM Claimed events
+├── same structure as hip4_deposits
+└── claimer, amount_wei
+
+hip4_contest_creations                ← decoded from createContest() calls
+├── block_number, tx_index (PK)
+└── contest_id, param2
+
+hip4_refunds                          ← decoded from refund() calls
+├── block_number, tx_index (PK)
+└── contest_id, side_id, user_address
+
+hip4_sweeps                           ← decoded from sweepUnclaimed() calls
+├── block_number, tx_index (PK)
+└── contest_id
+
+hip4_markets                          ← polled from outcomeMeta API
+├── outcome_id (PK)
+├── name, description, side_specs (JSON)
+└── question_id, question_name
+
+hip4_prices                           ← polled from allMids API
+├── coin, timestamp (PK)              ← "#90", "#91", "#11760"
+└── mid_price                         ← 0.0 to 1.0 (implied probability)
+
+indexer_cursor
+├── network (PK)                      ← "mainnet" or "testnet"
+└── last_block, updated_at
+```
+
+### Data Flow
+
+```
+S3 EVM blocks ──→ blocks → transactions → event_logs → system_transfers
+                                       └→ hip4_deposits, hip4_claims (decoded)
+                                       └→ hip4_contest_creations, hip4_refunds, hip4_sweeps
+
+S3 node_fills ──→ fills ──→ hip4_trades (# coins mirrored)
+
+HyperCore API ──→ hip4_markets (metadata)
+               └→ hip4_prices (implied probability snapshots)
+```
