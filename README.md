@@ -4,64 +4,174 @@ Blazing-fast Rust indexer for Hyperliquid's HyperCore EVM. Ingests block data di
 
 Built for HIP4 prediction market indexing. Testnet live now -- when HIP4 goes mainnet, one config change enables everything.
 
-## What Gets Indexed
+## Data Model
 
-| Table | Contents |
-|-------|----------|
-| `blocks` | Block number, hash, parent hash, timestamp, gas used/limit, tx counts |
-| `transactions` | Computed tx hash, type (Legacy/Eip1559/Eip2930), to, value, gas, success |
-| `system_transfers` | Dual hashes (official + explorer), system address, asset type, recipient, amount |
-| `event_logs` | Contract address, topic0-3, log data |
-| `fills` | Every perp/spot/commodity/HIP4 trade fill on Hyperliquid |
-| `hip4_deposits` | Decoded Deposit events from HIP4 contest contract |
-| `hip4_claims` | Decoded Claimed events from HIP4 contest contract |
-| `hip4_markets` | Market metadata from `outcomeMeta` API (name, description, sides) |
-| `hip4_prices` | Mid-price snapshots for `#`-prefixed prediction market coins |
-| `hip4_trades` | HIP4-specific fills mirrored from `fills` (`#`-prefixed coins) |
-| `indexer_cursor` | Resume position per network |
+### Core (EVM blocks from S3)
+
+```
+blocks
+├── block_number (PK)
+├── block_hash, parent_hash
+├── timestamp, gas_used, gas_limit, base_fee_per_gas
+└── tx_count, system_tx_count
+
+transactions
+├── block_number, tx_index (PK)
+├── tx_hash                          ← computed via RLP + keccak256
+├── tx_type (Legacy/Eip2930/Eip1559)
+├── from, to, value, input
+├── gas_limit, gas_used, success
+└── FK → blocks
+
+event_logs
+├── block_number, tx_index, log_index (PK)
+├── address, topic0..topic3, data
+└── FK → transactions
+
+system_transfers
+├── block_number, tx_index (PK)
+├── official_hash, explorer_hash     ← dual phantom hashes
+├── system_address, asset_type, asset_index
+├── recipient, amount_wei
+└── FK → blocks
+```
+
+### Trade Fills (from S3 `node_fills_by_block`)
+
+```
+fills
+├── trade_id, user_address (PK)
+├── block_number, block_time
+├── coin                              ← "BTC", "ETH", "@230", "#90"
+├── price, size, side, direction
+├── closed_pnl, fee, fee_token
+└── fill_time
+
+hip4_trades                           ← mirror of fills where coin starts with #
+└── same schema as fills
+```
+
+### HIP4 Prediction Markets
+
+```
+hip4_deposits                         ← decoded from EVM Deposit events
+├── block_number, tx_index, log_index (PK)
+├── contest_id, side_id
+├── depositor, amount_wei
+└── FK → event_logs
+
+hip4_claims                           ← decoded from EVM Claimed events
+├── same structure as hip4_deposits
+└── claimer, amount_wei
+
+hip4_contest_creations                ← decoded from createContest() calls
+├── block_number, tx_index (PK)
+└── contest_id, param2
+
+hip4_refunds                          ← decoded from refund() calls
+├── block_number, tx_index (PK)
+└── contest_id, side_id, user_address
+
+hip4_sweeps                           ← decoded from sweepUnclaimed() calls
+├── block_number, tx_index (PK)
+└── contest_id
+
+hip4_markets                          ← polled from outcomeMeta API
+├── outcome_id (PK)
+├── name, description, side_specs (JSON)
+└── question_id, question_name
+
+hip4_prices                           ← polled from allMids API
+├── coin, timestamp (PK)              ← "#90", "#91", "#11760"
+└── mid_price                         ← 0.0 to 1.0 (implied probability)
+
+indexer_cursor
+├── network (PK)                      ← "mainnet" or "testnet"
+└── last_block, updated_at
+```
+
+### Data Flow
+
+```
+S3 EVM blocks ──→ blocks → transactions → event_logs → system_transfers
+                                       └→ hip4_deposits, hip4_claims (decoded)
+                                       └→ hip4_contest_creations, hip4_refunds, hip4_sweeps
+
+S3 node_fills ──→ fills ──→ hip4_trades (# coins mirrored)
+
+HyperCore API ──→ hip4_markets (metadata)
+               └→ hip4_prices (implied probability snapshots)
+```
 
 ## Installation
 
-**Docker (pre-built):**
+### Docker (recommended)
+
+Pre-built image, no Rust toolchain needed:
+
 ```bash
 docker pull ghcr.io/exomonk/hypercore-indexer:latest
 docker run --rm ghcr.io/exomonk/hypercore-indexer --help
 ```
 
-**Docker (build locally):**
+Run with config + AWS credentials:
+
 ```bash
-docker build -t hypercore-indexer .
-docker run --rm hypercore-indexer --help
+# Generate a config file
+docker run --rm ghcr.io/exomonk/hypercore-indexer init > hypercore.toml
+
+# Live index (mounts config + AWS credentials)
+docker run --rm \
+  -v $(pwd)/hypercore.toml:/app/hypercore.toml \
+  -v $HOME/.aws:/root/.aws:ro \
+  ghcr.io/exomonk/hypercore-indexer live
 ```
 
-**From source:**
+### Install from source
+
+Requires Rust 1.91+:
+
 ```bash
+# Option 1: install script (builds + generates config)
+curl -sSL https://raw.githubusercontent.com/ExoMonk/hypercore-indexer/main/install.sh | bash
+
+# Option 2: manual
+git clone https://github.com/ExoMonk/hypercore-indexer.git
+cd hypercore-indexer
 cargo install --path .
 hypercore-indexer init
 ```
 
-**Examples:** See [`examples/live-sqlite/`](examples/live-sqlite/) (zero dependencies) and [`examples/backfill-postgres/`](examples/backfill-postgres/) (Docker Compose).
+After installation, `hypercore-indexer` is available as a CLI:
+
+```bash
+hypercore-indexer --help
+hypercore-indexer init                    # generate hypercore.toml
+hypercore-indexer live                    # start indexing from chain tip
+hypercore-indexer backfill --from 5000000 # backfill from block, then live
+```
+
+### Examples
+
+| Example | What | How |
+|---------|------|-----|
+| [`live-sqlite`](examples/live-sqlite/) | Live indexing, zero infra | `./run.sh` |
+| [`backfill-postgres`](examples/backfill-postgres/) | Backfill into PostgreSQL | `docker compose up` |
+| [`live-hip4-clickhouse`](examples/live-hip4-clickhouse/) | HIP4 prediction markets + ClickHouse | `docker compose up` |
 
 ## Quick Start
 
 ```bash
-# Initialize config (SQLite by default, zero setup)
-cargo run -- init
+# CLI: live index into SQLite (from chain tip, zero setup)
+hypercore-indexer init
+hypercore-indexer live
 
-# Backfill 1000 mainnet blocks
-cargo run -- backfill --from 5000000 --to 5001000
+# CLI: backfill a range then auto-switch to live
+hypercore-indexer backfill --from 5000000
 
-# Check what landed
-make query
-```
-
-For PostgreSQL:
-
-```bash
-make dev   # start Docker PostgreSQL
-cargo run -- init --storage postgres
-cargo run -- backfill --from 5000000 --to 5001000
-make query
+# Docker Compose: HIP4 prediction markets with ClickHouse
+cd examples/live-hip4-clickhouse
+docker compose up
 ```
 
 ## Commands
