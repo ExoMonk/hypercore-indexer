@@ -17,20 +17,22 @@ services:
 
   indexer:
     image: ghcr.io/exomonk/hypercore-indexer:latest
-    # Or build locally: uncomment below and comment out image above
+    # Or build locally:
     # build:
     #   context: ../..
-    #   dockerfile: Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ./hypercore.toml:/app/hypercore.toml
+      # Mount AWS credentials (profile-based auth)
+      - ${HOME}/.aws:/root/.aws:ro
     environment:
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
       - AWS_REGION=ap-northeast-1
-    command: ["backfill", "--from", "5000000", "--to", "5001000"]
+      # Or use env vars instead of mounted credentials:
+      # - AWS_ACCESS_KEY_ID
+      # - AWS_SECRET_ACCESS_KEY
+    command: ["backfill", "--from", "5000000", "--to", "5000100"]
 
 volumes:
   pgdata:

@@ -8,15 +8,16 @@ BINARY="$PROJECT_ROOT/target/release/hypercore-indexer"
 echo "=== hypercore-indexer: Live SQLite Example ==="
 echo ""
 
-# Check AWS credentials
-if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
-    echo "AWS credentials not set. The S3 bucket is requester-pays."
-    echo ""
-    echo "  export AWS_ACCESS_KEY_ID=..."
-    echo "  export AWS_SECRET_ACCESS_KEY=..."
-    echo "  export AWS_REGION=ap-northeast-1"
-    echo ""
-    exit 1
+# Check AWS credentials (env vars or profile)
+if ! aws sts get-caller-identity &>/dev/null 2>&1; then
+    if [ -z "${AWS_ACCESS_KEY_ID:-}" ]; then
+        echo "AWS credentials not configured. The S3 bucket is requester-pays."
+        echo ""
+        echo "  aws configure           # profile-based"
+        echo "  # or: export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=..."
+        echo ""
+        exit 1
+    fi
 fi
 
 # Build if needed
@@ -26,24 +27,9 @@ if [ ! -f "$BINARY" ]; then
     echo ""
 fi
 
-echo "Step 1: Backfill blocks 5,000,000 - 5,001,000 into SQLite"
-echo "  Config: $SCRIPT_DIR/hypercore.toml"
-echo "  Database: $SCRIPT_DIR/hypercore.db"
-echo ""
-
 cd "$SCRIPT_DIR"
-"$BINARY" --config hypercore.toml backfill --from 5000000 --to 5001000
 
-echo ""
-echo "=== Backfill complete ==="
-echo ""
-echo "Data is in: $SCRIPT_DIR/hypercore.db"
-echo ""
-echo "Quick check (requires sqlite3):"
-echo "  sqlite3 hypercore.db 'SELECT COUNT(*) AS blocks FROM blocks;'"
-echo "  sqlite3 hypercore.db 'SELECT COUNT(*) AS txs FROM transactions;'"
-echo "  sqlite3 hypercore.db 'SELECT COUNT(*) AS transfers FROM system_transfers;'"
-echo ""
-echo "To start live indexing (follows chain tip):"
-echo "  $BINARY --config hypercore.toml live"
-echo ""
+# That's it. The indexer handles everything:
+# - First run (no cursor): discovers chain tip, starts indexing from there
+# - Subsequent runs: resumes from last indexed block, catches up, follows tip
+"$BINARY" --config hypercore.toml live

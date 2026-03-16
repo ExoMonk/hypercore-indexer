@@ -45,18 +45,22 @@ pub async fn run_live(
     // Wrap storage in Arc so it can be shared with the HIP4 poller
     let storage: Arc<dyn Storage> = Arc::from(storage);
 
-    // Get current cursor from DB
-    let mut cursor = storage
-        .get_cursor(network)
-        .await?
-        .ok_or_else(|| {
-            eyre::eyre!(
-                "No cursor found for network '{}'. Run backfill first or specify --from.",
-                network
-            )
-        })?;
-
-    info!("[LIVE] Starting from block {} (cursor)", cursor);
+    // Get current cursor from DB, or discover tip if first run
+    let mut cursor = match storage.get_cursor(network).await? {
+        Some(c) => {
+            info!("[LIVE] Resuming from block {} (cursor)", c);
+            c
+        }
+        None => {
+            info!("[LIVE] No cursor found, discovering chain tip...");
+            let tip = tip::find_s3_tip(&s3_client, 1).await?;
+            // Set cursor to tip-1 so the loop starts by fetching `tip`
+            let initial = tip.saturating_sub(1);
+            storage.set_cursor(network, initial).await?;
+            info!("[LIVE] Starting from chain tip (block {})", tip);
+            initial
+        }
+    };
 
     let mut interval = AdaptiveInterval::new(
         live_config.poll_interval_ms,

@@ -17,15 +17,18 @@ $COMPOSE exec -T postgres psql -U postgres -d hypercore -c \
 echo ""
 echo "--- Latest 5 Blocks ---"
 $COMPOSE exec -T postgres psql -U postgres -d hypercore -c \
-  "SELECT number, hash, tx_count, timestamp
+  "SELECT block_number, encode(block_hash, 'hex') AS hash, tx_count, to_timestamp(timestamp) AS time
    FROM blocks
-   ORDER BY number DESC
+   ORDER BY block_number DESC
    LIMIT 5;"
 
 echo ""
-echo "--- System Transfers (first 10) ---"
+echo "--- System Transfers ---"
 $COMPOSE exec -T postgres psql -U postgres -d hypercore -c \
-  "SELECT block_number, system_address, recipient, amount, asset_type
+  "SELECT block_number, asset_type,
+          encode(system_address, 'hex') AS system_addr,
+          encode(recipient, 'hex') AS recipient,
+          amount_wei::text AS amount
    FROM system_transfers
    ORDER BY block_number
    LIMIT 10;"
@@ -39,12 +42,9 @@ $COMPOSE exec -T postgres psql -U postgres -d hypercore -c \
    ORDER BY count DESC;"
 
 echo ""
-echo "--- Find a Transaction by Hash ---"
-echo "(replace the hash with one from your data)"
+echo "--- Cursor ---"
 $COMPOSE exec -T postgres psql -U postgres -d hypercore -c \
-  "SELECT tx_hash, block_number, tx_type, \"to\", value, success
-   FROM transactions
-   LIMIT 1;"
+  "SELECT * FROM indexer_cursor;"
 
 echo ""
 echo "=== Done ==="

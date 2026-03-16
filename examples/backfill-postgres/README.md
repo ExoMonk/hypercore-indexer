@@ -5,16 +5,15 @@ Backfill Hyperliquid blocks into PostgreSQL using Docker Compose.
 ## Prerequisites
 
 - Docker and Docker Compose
-- AWS credentials (the S3 bucket is requester-pays)
+- AWS credentials configured in `~/.aws/credentials` (the S3 bucket is requester-pays)
 
 ## Quick Start
 
 ```bash
-# Set AWS credentials
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
+# Ensure AWS credentials are configured
+aws sts get-caller-identity    # should show your account
 
-# Start PostgreSQL + run backfill
+# Start PostgreSQL + run backfill (100 blocks)
 docker compose up
 
 # In another terminal, check the data

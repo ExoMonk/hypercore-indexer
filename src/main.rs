@@ -347,10 +347,11 @@ enabled = false
                 None => None,
             };
 
-            // Determine start block: --from flag, or DB cursor, or file cursor, or error.
+            // Determine start block: --from flag, or DB cursor, or file cursor, or discover tip.
             let start_block = match from {
                 Some(block) => block,
                 None => {
+                    // Try DB cursor first
                     if let Some(ref store) = &db_storage {
                         match store.get_cursor(&network_name).await? {
                             Some(cursor) => {
@@ -358,13 +359,15 @@ enabled = false
                                 cursor + 1
                             }
                             None => {
-                                return Err(eyre::eyre!(
-                                    "No --from specified and no DB cursor found for network '{network_name}'. \
-                                     Specify --from <block_number> to start."
-                                ));
+                                // No cursor — discover tip and start from there
+                                info!("No cursor found, discovering S3 tip to start from current chain head...");
+                                let tip = live::tip::find_s3_tip(&client, 1).await?;
+                                info!(tip, "Starting from chain tip");
+                                tip
                             }
                         }
                     } else {
+                        // File-based cursor
                         let cursor_path = cursor_file.clone().unwrap_or_else(|| {
                             let mut path = dirs_path(&network);
                             path.push(format!("cursor_{}.txt", network));
@@ -373,11 +376,11 @@ enabled = false
                         match pipeline::range::read_cursor(&cursor_path)? {
                             Some(cursor) => cursor + 1,
                             None => {
-                                return Err(eyre::eyre!(
-                                    "No --from specified and no cursor file found at {}. \
-                                     Specify --from <block_number> to start.",
-                                    cursor_path.display()
-                                ));
+                                // No cursor — discover tip
+                                info!("No cursor found, discovering S3 tip to start from current chain head...");
+                                let tip = live::tip::find_s3_tip(&client, 1).await?;
+                                info!(tip, "Starting from chain tip");
+                                tip
                             }
                         }
                     }

@@ -5,43 +5,45 @@ Index Hyperliquid blocks into SQLite with zero external dependencies.
 ## Prerequisites
 
 - Rust toolchain (1.91+)
-- AWS credentials (the S3 bucket is requester-pays)
+- AWS credentials configured (the S3 bucket is requester-pays)
 
 ## Quick Start
 
 ```bash
-# Set AWS credentials
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
-export AWS_REGION=ap-northeast-1
+# AWS credentials — either profile-based or env vars
+aws configure                  # option 1: ~/.aws/credentials
+# export AWS_ACCESS_KEY_ID=... # option 2: env vars
 
-# Run the example (builds + backfills 1000 blocks)
+# Run the example — backfills to chain tip, then follows it live
 ./run.sh
 ```
 
 ## What It Does
 
+**First run:**
 1. Builds `hypercore-indexer` in release mode (if not already built)
-2. Backfills blocks 5,000,000 to 5,001,000 from mainnet S3
-3. Stores everything in a local `hypercore.db` SQLite file
+2. Discovers the chain tip on S3
+3. Backfills from block 5,000,000 to the tip
+4. Automatically switches to live mode (follows the chain)
+
+**Subsequent runs:**
+1. Detects existing cursor in `hypercore.db`
+2. Goes straight to live mode (resumes from last indexed block)
+
+## Custom Start Block
+
+```bash
+# Start from a more recent block (faster initial sync)
+./run.sh 29000000
+```
 
 ## Check the Data
 
 ```bash
 sqlite3 hypercore.db 'SELECT COUNT(*) AS blocks FROM blocks;'
 sqlite3 hypercore.db 'SELECT COUNT(*) AS txs FROM transactions;'
-sqlite3 hypercore.db 'SELECT number, timestamp FROM blocks ORDER BY number DESC LIMIT 5;'
+sqlite3 hypercore.db 'SELECT block_number, tx_count FROM blocks ORDER BY block_number DESC LIMIT 5;'
 ```
-
-## Start Live Mode
-
-After backfilling, follow the chain tip:
-
-```bash
-../../target/release/hypercore-indexer --config hypercore.toml live
-```
-
-This will continuously poll S3 for new blocks and index them into the same SQLite database.
 
 ## Customize
 
