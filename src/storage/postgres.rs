@@ -3,6 +3,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use tracing::info;
 
 use crate::decode::types::{AssetType, DecodedBlock, TxType};
+use crate::fills::types::FillRecord;
 use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
 
 use super::Storage;
@@ -580,6 +581,146 @@ impl Storage for PostgresStorage {
 
     async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
         Self::insert_hip4_prices_pg(&self.pool, prices).await
+    }
+
+    async fn insert_fills(&self, fills: &[FillRecord]) -> eyre::Result<()> {
+        if fills.is_empty() {
+            return Ok(());
+        }
+
+        let len = fills.len();
+        let mut trade_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut block_times: Vec<String> = Vec::with_capacity(len);
+        let mut user_addresses: Vec<String> = Vec::with_capacity(len);
+        let mut coins: Vec<String> = Vec::with_capacity(len);
+        let mut prices: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut sizes: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut sides: Vec<String> = Vec::with_capacity(len);
+        let mut directions: Vec<String> = Vec::with_capacity(len);
+        let mut closed_pnls: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut hashes: Vec<String> = Vec::with_capacity(len);
+        let mut order_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut crosseds: Vec<bool> = Vec::with_capacity(len);
+        let mut fees: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut fee_tokens: Vec<String> = Vec::with_capacity(len);
+        let mut fill_times: Vec<i64> = Vec::with_capacity(len);
+
+        for f in fills {
+            trade_ids.push(f.trade_id);
+            block_numbers.push(f.block_number);
+            block_times.push(f.block_time.clone());
+            user_addresses.push(f.user_address.clone());
+            coins.push(f.coin.clone());
+            prices.push(f.price.parse().map_err(|e| eyre::eyre!("Invalid price '{}': {e}", f.price))?);
+            sizes.push(f.size.parse().map_err(|e| eyre::eyre!("Invalid size '{}': {e}", f.size))?);
+            sides.push(f.side.clone());
+            directions.push(f.direction.clone());
+            closed_pnls.push(f.closed_pnl.parse().map_err(|e| eyre::eyre!("Invalid closed_pnl '{}': {e}", f.closed_pnl))?);
+            hashes.push(f.hash.clone());
+            order_ids.push(f.order_id);
+            crosseds.push(f.crossed);
+            fees.push(f.fee.parse().map_err(|e| eyre::eyre!("Invalid fee '{}': {e}", f.fee))?);
+            fee_tokens.push(f.fee_token.clone());
+            fill_times.push(f.fill_time);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO fills (trade_id, block_number, block_time, user_address, coin, price, size, side, direction, closed_pnl, hash, order_id, crossed, fee, fee_token, fill_time)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::BIGINT[], $3::TEXT[], $4::TEXT[], $5::TEXT[], $6::NUMERIC[], $7::NUMERIC[], $8::TEXT[], $9::TEXT[], $10::NUMERIC[], $11::TEXT[], $12::BIGINT[], $13::BOOLEAN[], $14::NUMERIC[], $15::TEXT[], $16::BIGINT[])
+               ON CONFLICT (trade_id, user_address) DO NOTHING"#,
+        )
+        .bind(&trade_ids)
+        .bind(&block_numbers)
+        .bind(&block_times)
+        .bind(&user_addresses)
+        .bind(&coins)
+        .bind(&prices)
+        .bind(&sizes)
+        .bind(&sides)
+        .bind(&directions)
+        .bind(&closed_pnls)
+        .bind(&hashes)
+        .bind(&order_ids)
+        .bind(&crosseds)
+        .bind(&fees)
+        .bind(&fee_tokens)
+        .bind(&fill_times)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert fills: {e}"))?;
+
+        Ok(())
+    }
+
+    async fn insert_hip4_trade_fills(&self, fills: &[&FillRecord]) -> eyre::Result<()> {
+        if fills.is_empty() {
+            return Ok(());
+        }
+
+        let len = fills.len();
+        let mut trade_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut block_times: Vec<String> = Vec::with_capacity(len);
+        let mut user_addresses: Vec<String> = Vec::with_capacity(len);
+        let mut coins: Vec<String> = Vec::with_capacity(len);
+        let mut prices: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut sizes: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut sides: Vec<String> = Vec::with_capacity(len);
+        let mut directions: Vec<String> = Vec::with_capacity(len);
+        let mut closed_pnls: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut hashes: Vec<String> = Vec::with_capacity(len);
+        let mut order_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut crosseds: Vec<bool> = Vec::with_capacity(len);
+        let mut fees: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut fee_tokens: Vec<String> = Vec::with_capacity(len);
+        let mut fill_times: Vec<i64> = Vec::with_capacity(len);
+
+        for f in fills {
+            trade_ids.push(f.trade_id);
+            block_numbers.push(f.block_number);
+            block_times.push(f.block_time.clone());
+            user_addresses.push(f.user_address.clone());
+            coins.push(f.coin.clone());
+            prices.push(f.price.parse().map_err(|e| eyre::eyre!("Invalid price '{}': {e}", f.price))?);
+            sizes.push(f.size.parse().map_err(|e| eyre::eyre!("Invalid size '{}': {e}", f.size))?);
+            sides.push(f.side.clone());
+            directions.push(f.direction.clone());
+            closed_pnls.push(f.closed_pnl.parse().map_err(|e| eyre::eyre!("Invalid closed_pnl '{}': {e}", f.closed_pnl))?);
+            hashes.push(f.hash.clone());
+            order_ids.push(f.order_id);
+            crosseds.push(f.crossed);
+            fees.push(f.fee.parse().map_err(|e| eyre::eyre!("Invalid fee '{}': {e}", f.fee))?);
+            fee_tokens.push(f.fee_token.clone());
+            fill_times.push(f.fill_time);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_trades (trade_id, block_number, block_time, user_address, coin, price, size, side, direction, closed_pnl, hash, order_id, crossed, fee, fee_token, fill_time)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::BIGINT[], $3::TEXT[], $4::TEXT[], $5::TEXT[], $6::NUMERIC[], $7::NUMERIC[], $8::TEXT[], $9::TEXT[], $10::NUMERIC[], $11::TEXT[], $12::BIGINT[], $13::BOOLEAN[], $14::NUMERIC[], $15::TEXT[], $16::BIGINT[])
+               ON CONFLICT (trade_id, user_address) DO NOTHING"#,
+        )
+        .bind(&trade_ids)
+        .bind(&block_numbers)
+        .bind(&block_times)
+        .bind(&user_addresses)
+        .bind(&coins)
+        .bind(&prices)
+        .bind(&sizes)
+        .bind(&sides)
+        .bind(&directions)
+        .bind(&closed_pnls)
+        .bind(&hashes)
+        .bind(&order_ids)
+        .bind(&crosseds)
+        .bind(&fees)
+        .bind(&fee_tokens)
+        .bind(&fill_times)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_trades: {e}"))?;
+
+        Ok(())
     }
 }
 

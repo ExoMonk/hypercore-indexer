@@ -94,6 +94,37 @@ impl HyperEvmS3Client {
         self.network
     }
 
+    /// Fetch raw data from any S3 bucket and key.
+    /// Used for node fills (different bucket than EVM blocks).
+    pub async fn fetch_raw(&self, bucket: &str, key: &str) -> Result<Vec<u8>> {
+        debug!(bucket, key, "Fetching from S3");
+
+        let resp = self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .request_payer(aws_sdk_s3::types::RequestPayer::Requester)
+            .send()
+            .await
+            .map_err(|e| eyre::eyre!("S3 GetObject failed for {bucket}/{key}: {e}"))?;
+
+        let bytes = resp
+            .body
+            .collect()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to read S3 response body: {e}"))?;
+
+        let data = bytes.to_vec();
+        debug!(
+            bucket,
+            key,
+            size = data.len(),
+            "Fetched data from S3"
+        );
+        Ok(data)
+    }
+
     /// Fetch raw compressed block data from S3.
     pub async fn fetch_block_raw(&self, block_number: u64) -> Result<Vec<u8>> {
         let key = block_to_s3_key(block_number);

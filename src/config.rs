@@ -14,6 +14,8 @@ pub struct Config {
     pub live: LiveConfig,
     #[serde(default)]
     pub hip4: Hip4Config,
+    #[serde(default)]
+    pub fills: FillsConfig,
 }
 
 #[derive(Debug, Default, Deserialize, Clone)]
@@ -132,6 +134,39 @@ impl Default for LiveConfig {
             backfill_workers: default_backfill_workers(),
         }
     }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FillsConfig {
+    /// Enable fills ingestion (default: false).
+    /// Used by live mode to decide whether to poll for fills.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub enabled: bool,
+    /// S3 bucket for node fills data (default: "hl-mainnet-node-data")
+    #[serde(default = "default_fills_bucket")]
+    pub bucket: String,
+    /// Mirror HIP4 (#-prefixed) fills to hip4_trades (default: true)
+    #[serde(default = "default_mirror_hip4")]
+    pub mirror_hip4: bool,
+}
+
+impl Default for FillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bucket: default_fills_bucket(),
+            mirror_hip4: default_mirror_hip4(),
+        }
+    }
+}
+
+fn default_fills_bucket() -> String {
+    "hl-mainnet-node-data".to_string()
+}
+
+fn default_mirror_hip4() -> bool {
+    true
 }
 
 fn default_poll_interval_ms() -> u64 {
@@ -473,6 +508,40 @@ url = "sqlite:./data.db"
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.hip4.enabled);
         assert!(config.hip4.contest_address.is_none());
+    }
+
+    #[test]
+    fn fills_config_defaults() {
+        let config = FillsConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.bucket, "hl-mainnet-node-data");
+        assert!(config.mirror_hip4);
+    }
+
+    #[test]
+    fn parse_toml_with_fills_section() {
+        let toml = r#"
+[fills]
+enabled = true
+bucket = "custom-bucket"
+mirror_hip4 = false
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(config.fills.enabled);
+        assert_eq!(config.fills.bucket, "custom-bucket");
+        assert!(!config.fills.mirror_hip4);
+    }
+
+    #[test]
+    fn parse_toml_without_fills_section_uses_defaults() {
+        let toml = r#"
+[network]
+name = "mainnet"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert!(!config.fills.enabled);
+        assert_eq!(config.fills.bucket, "hl-mainnet-node-data");
+        assert!(config.fills.mirror_hip4);
     }
 
     #[test]

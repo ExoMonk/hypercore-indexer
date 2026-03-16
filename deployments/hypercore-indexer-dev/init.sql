@@ -113,6 +113,54 @@ CREATE TABLE IF NOT EXISTS hip4_prices (
 );
 CREATE INDEX IF NOT EXISTS idx_hip4_prices_time ON hip4_prices (timestamp);
 
+CREATE TABLE IF NOT EXISTS fills (
+    trade_id        BIGINT NOT NULL,
+    block_number    BIGINT NOT NULL,
+    block_time      TEXT NOT NULL,
+    user_address    TEXT NOT NULL,
+    coin            TEXT NOT NULL,
+    price           NUMERIC NOT NULL,
+    size            NUMERIC NOT NULL,
+    side            TEXT NOT NULL,
+    direction       TEXT NOT NULL,
+    closed_pnl      NUMERIC NOT NULL,
+    hash            TEXT NOT NULL,
+    order_id        BIGINT NOT NULL,
+    crossed         BOOLEAN NOT NULL,
+    fee             NUMERIC NOT NULL,
+    fee_token       TEXT NOT NULL,
+    fill_time       BIGINT NOT NULL,
+    PRIMARY KEY (trade_id, user_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fills_coin ON fills (coin, fill_time);
+CREATE INDEX IF NOT EXISTS idx_fills_user ON fills (user_address, fill_time);
+CREATE INDEX IF NOT EXISTS idx_fills_block ON fills (block_number);
+CREATE INDEX IF NOT EXISTS idx_fills_time ON fills (fill_time);
+
+CREATE TABLE IF NOT EXISTS hip4_trades (
+    trade_id        BIGINT NOT NULL,
+    block_number    BIGINT NOT NULL,
+    block_time      TEXT NOT NULL,
+    user_address    TEXT NOT NULL,
+    coin            TEXT NOT NULL,
+    price           NUMERIC NOT NULL,
+    size            NUMERIC NOT NULL,
+    side            TEXT NOT NULL,
+    direction       TEXT NOT NULL,
+    closed_pnl      NUMERIC NOT NULL,
+    hash            TEXT NOT NULL,
+    order_id        BIGINT NOT NULL,
+    crossed         BOOLEAN NOT NULL,
+    fee             NUMERIC NOT NULL,
+    fee_token       TEXT NOT NULL,
+    fill_time       BIGINT NOT NULL,
+    PRIMARY KEY (trade_id, user_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hip4_trades_coin ON hip4_trades (coin, fill_time);
+CREATE INDEX IF NOT EXISTS idx_hip4_trades_user ON hip4_trades (user_address, fill_time);
+
 CREATE TABLE IF NOT EXISTS indexer_cursor (
     network         TEXT PRIMARY KEY,
     last_block      BIGINT NOT NULL,

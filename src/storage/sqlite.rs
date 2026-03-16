@@ -4,6 +4,7 @@ use std::str::FromStr;
 use tracing::info;
 
 use crate::decode::types::{DecodedBlock, DecodedTx};
+use crate::fills::types::FillRecord;
 use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
 
 use super::postgres::{asset_type_to_db, tx_type_to_smallint};
@@ -123,6 +124,54 @@ CREATE TABLE IF NOT EXISTS hip4_prices (
     PRIMARY KEY (coin, timestamp)
 );
 CREATE INDEX IF NOT EXISTS idx_hip4_prices_time ON hip4_prices (timestamp);
+
+CREATE TABLE IF NOT EXISTS fills (
+    trade_id        INTEGER NOT NULL,
+    block_number    INTEGER NOT NULL,
+    block_time      TEXT NOT NULL,
+    user_address    TEXT NOT NULL,
+    coin            TEXT NOT NULL,
+    price           TEXT NOT NULL,
+    size            TEXT NOT NULL,
+    side            TEXT NOT NULL,
+    direction       TEXT NOT NULL,
+    closed_pnl      TEXT NOT NULL,
+    hash            TEXT NOT NULL,
+    order_id        INTEGER NOT NULL,
+    crossed         INTEGER NOT NULL,
+    fee             TEXT NOT NULL,
+    fee_token       TEXT NOT NULL,
+    fill_time       INTEGER NOT NULL,
+    PRIMARY KEY (trade_id, user_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fills_coin ON fills (coin, fill_time);
+CREATE INDEX IF NOT EXISTS idx_fills_user ON fills (user_address, fill_time);
+CREATE INDEX IF NOT EXISTS idx_fills_block ON fills (block_number);
+CREATE INDEX IF NOT EXISTS idx_fills_time ON fills (fill_time);
+
+CREATE TABLE IF NOT EXISTS hip4_trades (
+    trade_id        INTEGER NOT NULL,
+    block_number    INTEGER NOT NULL,
+    block_time      TEXT NOT NULL,
+    user_address    TEXT NOT NULL,
+    coin            TEXT NOT NULL,
+    price           TEXT NOT NULL,
+    size            TEXT NOT NULL,
+    side            TEXT NOT NULL,
+    direction       TEXT NOT NULL,
+    closed_pnl      TEXT NOT NULL,
+    hash            TEXT NOT NULL,
+    order_id        INTEGER NOT NULL,
+    crossed         INTEGER NOT NULL,
+    fee             TEXT NOT NULL,
+    fee_token       TEXT NOT NULL,
+    fill_time       INTEGER NOT NULL,
+    PRIMARY KEY (trade_id, user_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hip4_trades_coin ON hip4_trades (coin, fill_time);
+CREATE INDEX IF NOT EXISTS idx_hip4_trades_user ON hip4_trades (user_address, fill_time);
 
 CREATE TABLE IF NOT EXISTS indexer_cursor (
     network         TEXT PRIMARY KEY,
@@ -532,5 +581,93 @@ impl Storage for SqliteStorage {
 
     async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
         Self::insert_hip4_prices_sqlite(&self.pool, prices).await
+    }
+
+    async fn insert_fills(&self, fills: &[FillRecord]) -> eyre::Result<()> {
+        if fills.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
+
+        for f in fills {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO fills (trade_id, block_number, block_time, user_address, coin, price, size, side, direction, closed_pnl, hash, order_id, crossed, fee, fee_token, fill_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            )
+            .bind(f.trade_id)
+            .bind(f.block_number)
+            .bind(&f.block_time)
+            .bind(&f.user_address)
+            .bind(&f.coin)
+            .bind(&f.price)
+            .bind(&f.size)
+            .bind(&f.side)
+            .bind(&f.direction)
+            .bind(&f.closed_pnl)
+            .bind(&f.hash)
+            .bind(f.order_id)
+            .bind(f.crossed)
+            .bind(&f.fee)
+            .bind(&f.fee_token)
+            .bind(f.fill_time)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert fill {}: {e}", f.trade_id))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to commit fills transaction: {e}"))?;
+
+        Ok(())
+    }
+
+    async fn insert_hip4_trade_fills(&self, fills: &[&FillRecord]) -> eyre::Result<()> {
+        if fills.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
+
+        for f in fills {
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_trades (trade_id, block_number, block_time, user_address, coin, price, size, side, direction, closed_pnl, hash, order_id, crossed, fee, fee_token, fill_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            )
+            .bind(f.trade_id)
+            .bind(f.block_number)
+            .bind(&f.block_time)
+            .bind(&f.user_address)
+            .bind(&f.coin)
+            .bind(&f.price)
+            .bind(&f.size)
+            .bind(&f.side)
+            .bind(&f.direction)
+            .bind(&f.closed_pnl)
+            .bind(&f.hash)
+            .bind(f.order_id)
+            .bind(f.crossed)
+            .bind(&f.fee)
+            .bind(&f.fee_token)
+            .bind(f.fill_time)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_trade fill {}: {e}", f.trade_id))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to commit hip4_trades transaction: {e}"))?;
+
+        Ok(())
     }
 }

@@ -3,6 +3,7 @@ use serde::Serialize;
 use tracing::info;
 
 use crate::decode::types::{AssetType, DecodedBlock, TxType};
+use crate::fills::types::FillRecord;
 use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
 
 use super::Storage;
@@ -96,6 +97,44 @@ const SCHEMA_SQL: &[&str] = &[
         _dummy          UInt8 DEFAULT 0
     ) ENGINE = ReplacingMergeTree()
     ORDER BY (coin, timestamp)",
+    "CREATE TABLE IF NOT EXISTS fills (
+        trade_id        Int64,
+        block_number    Int64,
+        block_time      String,
+        user_address    String,
+        coin            String,
+        price           String,
+        size            String,
+        side            String,
+        direction       String,
+        closed_pnl      String,
+        hash            String,
+        order_id        Int64,
+        crossed         UInt8,
+        fee             String,
+        fee_token       String,
+        fill_time       Int64
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (trade_id, user_address)",
+    "CREATE TABLE IF NOT EXISTS hip4_trades (
+        trade_id        Int64,
+        block_number    Int64,
+        block_time      String,
+        user_address    String,
+        coin            String,
+        price           String,
+        size            String,
+        side            String,
+        direction       String,
+        closed_pnl      String,
+        hash            String,
+        order_id        Int64,
+        crossed         UInt8,
+        fee             String,
+        fee_token       String,
+        fill_time       Int64
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (trade_id, user_address)",
     "CREATE TABLE IF NOT EXISTS indexer_cursor (
         network         String,
         last_block      UInt64,
@@ -199,6 +238,49 @@ struct Hip4PriceChRow {
     mid_price: String,
     #[serde(with = "clickhouse::serde::time::datetime64::millis")]
     timestamp: time::OffsetDateTime,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct FillChRow {
+    trade_id: i64,
+    block_number: i64,
+    block_time: String,
+    user_address: String,
+    coin: String,
+    price: String,
+    size: String,
+    side: String,
+    direction: String,
+    closed_pnl: String,
+    hash: String,
+    order_id: i64,
+    crossed: u8,
+    fee: String,
+    fee_token: String,
+    fill_time: i64,
+}
+
+impl FillChRow {
+    fn from_record(f: &FillRecord) -> Self {
+        Self {
+            trade_id: f.trade_id,
+            block_number: f.block_number,
+            block_time: f.block_time.clone(),
+            user_address: f.user_address.clone(),
+            coin: f.coin.clone(),
+            price: f.price.clone(),
+            size: f.size.clone(),
+            side: f.side.clone(),
+            direction: f.direction.clone(),
+            closed_pnl: f.closed_pnl.clone(),
+            hash: f.hash.clone(),
+            order_id: f.order_id,
+            crossed: f.crossed as u8,
+            fee: f.fee.clone(),
+            fee_token: f.fee_token.clone(),
+            fill_time: f.fill_time,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, clickhouse::Row)]
@@ -631,5 +713,55 @@ impl Storage for ClickHouseStorage {
 
     async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
         self.insert_hip4_prices_ch(prices).await
+    }
+
+    async fn insert_fills(&self, fills: &[FillRecord]) -> eyre::Result<()> {
+        if fills.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<FillChRow>("fills")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create fills inserter: {e}"))?;
+
+        for f in fills {
+            insert
+                .write(&FillChRow::from_record(f))
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write fill row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush fills insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn insert_hip4_trade_fills(&self, fills: &[&FillRecord]) -> eyre::Result<()> {
+        if fills.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<FillChRow>("hip4_trades")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_trades inserter: {e}"))?;
+
+        for f in fills {
+            insert
+                .write(&FillChRow::from_record(f))
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_trade row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_trades insert: {e}"))?;
+        Ok(())
     }
 }

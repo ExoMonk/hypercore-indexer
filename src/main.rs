@@ -6,6 +6,7 @@ use tracing::info;
 mod config;
 mod decode;
 mod error;
+mod fills;
 mod hip4;
 mod live;
 mod pipeline;
@@ -113,6 +114,21 @@ enum Commands {
         database_url: Option<String>,
     },
 
+    /// Backfill trade fills from S3 node_fills data for a date range
+    FillsBackfill {
+        /// Start date in YYYYMMDD format (e.g. "20260315")
+        #[arg(long)]
+        from_date: String,
+
+        /// End date in YYYYMMDD format (inclusive, e.g. "20260316")
+        #[arg(long)]
+        to_date: String,
+
+        /// Database URL (overrides config)
+        #[arg(long, env = "DATABASE_URL")]
+        database_url: Option<String>,
+    },
+
     /// Follow the chain tip, continuously indexing new blocks from S3
     Live {
         /// Start block (if omitted, resumes from DB cursor)
@@ -208,6 +224,11 @@ enabled = false
 # api_url = "https://api.hyperliquid-testnet.xyz/info"
 # meta_poll_interval_s = 60
 # price_poll_interval_s = 5
+
+[fills]
+enabled = false
+# bucket = "hl-mainnet-node-data"
+# mirror_hip4 = true
 "#
             );
 
@@ -520,6 +541,54 @@ enabled = false
             });
 
             hip4::poller::run_hip4_poller(api_client, db_storage, &cfg.hip4, shutdown_rx).await?;
+        }
+
+        Commands::FillsBackfill {
+            from_date,
+            to_date,
+            database_url,
+        } => {
+            let client = HyperEvmS3Client::new(region, network).await?;
+            let client = Arc::new(client);
+
+            // Resolve database URL: CLI flag > env var > config file
+            let effective_db_url = cfg.database_url(database_url.as_deref());
+            let db_url = effective_db_url.ok_or_else(|| {
+                eyre::eyre!(
+                    "fills-backfill requires a database. Specify --database-url, set DATABASE_URL env, \
+                     or add [storage].url to your config file."
+                )
+            })?;
+
+            // Connect to storage backend
+            let db_storage: Box<dyn storage::Storage> = if db_url.starts_with("sqlite:") {
+                let sqlite = storage::sqlite::SqliteStorage::connect(&db_url).await?;
+                sqlite.ensure_schema().await?;
+                Box::new(sqlite)
+            } else if db_url.starts_with("http://") || db_url.starts_with("https://") {
+                let ch = storage::clickhouse::ClickHouseStorage::connect(&db_url).await?;
+                ch.ensure_schema().await?;
+                Box::new(ch)
+            } else {
+                let pg = storage::postgres::PostgresStorage::connect(&db_url).await?;
+                pg.ensure_schema().await?;
+                Box::new(pg)
+            };
+
+            let bucket = cfg.fills.bucket.clone();
+            let mirror_hip4 = cfg.fills.mirror_hip4;
+
+            let total = fills::backfill_fills(
+                client,
+                &bucket,
+                &from_date,
+                &to_date,
+                &*db_storage,
+                mirror_hip4,
+            )
+            .await?;
+
+            info!(total_fills = total, "Fills backfill complete");
         }
 
         Commands::Live {
