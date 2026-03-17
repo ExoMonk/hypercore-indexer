@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1100" font-family="JetBrains Mono, monospace">
+  <defs>
+    <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+      <line x1="60" y1="0" x2="60" y2="60" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+      <line x1="0" y1="60" x2="60" y2="60" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+    </pattern>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="900" height="1100" fill="#0c0c0c"/>
+  <rect width="900" height="1100" fill="url(#grid)"/>
+
+  <!-- Outer corner brackets -->
+  <path d="M16,21 L16,16 L21,16" stroke="#00ff88" stroke-width="1" fill="none"/>
+  <path d="M879,16 L884,16 L884,21" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"/>
+  <path d="M16,1079 L16,1084 L21,1084" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"/>
+  <path d="M879,1084 L884,1084 L884,1079" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"/>
+
+  <!-- Title -->
+  <text x="40" y="48" fill="#6b6560" font-size="9" letter-spacing="0.15em">// E2E EXAMPLE RESULTS</text>
+  <text x="40" y="72" fill="#e8e4de" font-size="14" font-weight="300" letter-spacing="-0.02em">All 3 Examples Validated</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- EXAMPLE A: Backfill PostgreSQL              -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <!-- Terminal window A -->
+  <rect x="40" y="95" width="820" height="230" rx="2" fill="#141414" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <path d="M40,100 L40,95 L45,95" stroke="#00ff88" stroke-width="1" fill="none"/>
+  <path d="M855,95 L860,95 L860,100" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"/>
+
+  <!-- Terminal title bar -->
+  <rect x="40" y="95" width="820" height="22" rx="2" fill="rgba(255,255,255,0.03)"/>
+  <circle cx="58" cy="106" r="4" fill="#ff5f57"/>
+  <circle cx="72" cy="106" r="4" fill="#febc2e"/>
+  <circle cx="86" cy="106" r="4" fill="#28c840"/>
+  <text x="450" y="110" text-anchor="middle" fill="#6b6560" font-size="9">Example A: Backfill PostgreSQL</text>
+
+  <!-- Terminal content -->
+  <text x="56" y="136" fill="#8a8578" font-size="9">$ docker compose run indexer backfill --from 5000000 --to 5000050</text>
+  <text x="56" y="156" fill="#6b6560" font-size="9">[COMPLETE] 51 blocks processed, 0 failed | elapsed: 1s | avg: 34 blocks/sec</text>
+  <text x="56" y="176" fill="#6b6560" font-size="9">Flushed final batch to storage | cursor = 5000050</text>
+
+  <text x="56" y="200" fill="#8a8578" font-size="9">$ ./queries.sh</text>
+  <text x="56" y="220" fill="#00ff88" font-size="9" filter="url(#glow)">blocks: 51   transactions: 284   system_transfers: 8   event_logs: 899</text>
+  <text x="56" y="240" fill="#e8e4de" font-size="9">cursor: mainnet → block 5000050</text>
+
+  <!-- Result badge -->
+  <rect x="740" y="287" width="100" height="22" rx="2" fill="rgba(0,255,136,0.04)" stroke="rgba(0,255,136,0.25)" stroke-width="1"/>
+  <circle cx="755" cy="298" r="3" fill="#00ff88"/>
+  <text x="765" y="302" fill="#00ff88" font-size="9" letter-spacing="0.05em">34 blk/s</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- EXAMPLE B: Live SQLite                      -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <!-- Terminal window B -->
+  <rect x="40" y="340" width="820" height="310" rx="2" fill="#141414" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <path d="M40,345 L40,340 L45,340" stroke="#00ff88" stroke-width="1" fill="none"/>
+  <path d="M855,340 L860,340 L860,345" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"/>
+
+  <!-- Terminal title bar -->
+  <rect x="40" y="340" width="820" height="22" rx="2" fill="rgba(255,255,255,0.03)"/>
+  <circle cx="58" cy="351" r="4" fill="#ff5f57"/>
+  <circle cx="72" cy="351" r="4" fill="#febc2e"/>
+  <circle cx="86" cy="351" r="4" fill="#28c840"/>
+  <text x="450" y="355" text-anchor="middle" fill="#6b6560" font-size="9">Example B: Live SQLite (mainnet)</text>
+
+  <!-- Phase 1 -->
+  <text x="56" y="381" fill="#8a8578" font-size="9">$ hypercore-indexer live</text>
+  <text x="56" y="401" fill="#6b6560" font-size="9">[LIVE] No cursor found, discovering chain tip...</text>
+  <text x="56" y="417" fill="#00ff88" font-size="9">[LIVE] Chain tip from RPC  tip=29934189</text>
+  <text x="490" y="417" fill="#6b6560" font-size="8">← 0.6s</text>
+  <text x="56" y="433" fill="#6b6560" font-size="9">[LIVE] Starting from chain tip (block 29934189)</text>
+  <text x="56" y="449" fill="#6b6560" font-size="9">[LIVE] Caught up. Following tip...</text>
+  <text x="56" y="465" fill="#e8e4de" font-size="9">[LIVE] Block 29934189 | 3 txs | 0 system</text>
+  <text x="56" y="481" fill="#e8e4de" font-size="9">[LIVE] Block 29934190 | 2 txs | 0 system</text>
+  <text x="56" y="497" fill="#8a8578" font-size="9">^C  (15 blocks indexed)</text>
+
+  <!-- Phase 2 -->
+  <text x="56" y="521" fill="#8a8578" font-size="9">$ hypercore-indexer live</text>
+  <text x="260" y="521" fill="#6b6560" font-size="8">← restart</text>
+  <text x="56" y="537" fill="#00ff88" font-size="9">[LIVE] Resuming from block 29934203 (cursor)</text>
+  <text x="56" y="553" fill="#6b6560" font-size="9">[LIVE] Caught up. Following tip...</text>
+  <text x="56" y="569" fill="#e8e4de" font-size="9">[LIVE] Block 29934204 | 3 txs | 0 system</text>
+  <text x="56" y="585" fill="#8a8578" font-size="9">^C  (+13 blocks, cursor: 29934216)</text>
+
+  <!-- Result badges -->
+  <rect x="620" y="600" width="110" height="22" rx="2" fill="rgba(0,255,136,0.04)" stroke="rgba(0,255,136,0.25)" stroke-width="1"/>
+  <circle cx="635" cy="611" r="3" fill="#00ff88"/>
+  <text x="645" y="615" fill="#00ff88" font-size="9" letter-spacing="0.05em">RPC: 0.6s</text>
+
+  <rect x="740" y="600" width="110" height="22" rx="2" fill="rgba(0,255,136,0.04)" stroke="rgba(0,255,136,0.25)" stroke-width="1"/>
+  <circle cx="755" cy="611" r="3" fill="#00ff88"/>
+  <text x="765" y="615" fill="#00ff88" font-size="9" letter-spacing="0.05em">resume ✓</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- EXAMPLE C: Live HIP4 ClickHouse             -->
+  <!-- ═══════════════════════════════════════════ -->
+
+  <!-- Terminal window C -->
+  <rect x="40" y="650" width="820" height="400" rx="2" fill="#141414" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  <path d="M40,655 L40,650 L45,650" stroke="#00ff88" stroke-width="1" fill="none"/>
+  <path d="M855,650 L860,650 L860,655" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none"/>
+
+  <!-- Terminal title bar -->
+  <rect x="40" y="650" width="820" height="22" rx="2" fill="rgba(255,255,255,0.03)"/>
+  <circle cx="58" cy="661" r="4" fill="#ff5f57"/>
+  <circle cx="72" cy="661" r="4" fill="#febc2e"/>
+  <circle cx="86" cy="661" r="4" fill="#28c840"/>
+  <text x="450" y="665" text-anchor="middle" fill="#6b6560" font-size="9">Example C: Live HIP4 ClickHouse (testnet)</text>
+
+  <!-- Phase 1 -->
+  <text x="56" y="691" fill="#8a8578" font-size="9">$ docker compose up</text>
+  <text x="56" y="711" fill="#6b6560" font-size="9">[LIVE] No cursor found, discovering chain tip...</text>
+  <text x="56" y="727" fill="#00ff88" font-size="9">[LIVE] Chain tip from RPC  tip=48354089</text>
+  <text x="56" y="743" fill="#6b6560" font-size="9">[LIVE] Starting from chain tip (block 48354089)</text>
+  <text x="56" y="759" fill="#6b6560" font-size="9">[LIVE] Caught up. Following tip...</text>
+  <text x="56" y="775" fill="#e8e4de" font-size="9">[HIP4-POLLER] Upserted markets  count=7</text>
+  <text x="56" y="791" fill="#e8e4de" font-size="9">[HIP4-POLLER] Inserted prices   count=14</text>
+  <text x="56" y="807" fill="#e8e4de" font-size="9">[LIVE] Block 48354089 | 0 txs | 0 system</text>
+
+  <!-- Query output -->
+  <text x="56" y="831" fill="#8a8578" font-size="9">$ ./queries.sh</text>
+  <text x="56" y="851" fill="#00ff88" font-size="9" filter="url(#glow)">blocks: 23   hip4_markets: 7   hip4_prices: 56   txs: 2</text>
+
+  <!-- HIP4 Markets table -->
+  <text x="56" y="875" fill="#8a8578" font-size="9">HIP4 Markets:</text>
+  <text x="56" y="893" fill="#e8e4de" font-size="8">  9   Who will win the HL 100 meter dash?</text>
+  <text x="56" y="907" fill="#e8e4de" font-size="8"> 10   Akami</text>
+  <text x="56" y="921" fill="#e8e4de" font-size="8"> 11   Canned Tuna</text>
+  <text x="56" y="935" fill="#e8e4de" font-size="8"> 12   Otoro</text>
+  <text x="56" y="949" fill="#e8e4de" font-size="8">1273  Recurring  class:priceBinary|underlying:BTC|targetPrice:74212</text>
+
+  <!-- HIP4 Prices -->
+  <text x="56" y="973" fill="#8a8578" font-size="9">HIP4 Prices:</text>
+  <text x="56" y="991" fill="#e8e4de" font-size="8">#90   0.669  (Hypurr)        #91   0.331  (Usain Bolt)</text>
+  <text x="56" y="1005" fill="#e8e4de" font-size="8">#100  0.619  (Akami Yes)     #101  0.381  (Akami No)</text>
+  <text x="56" y="1019" fill="#e8e4de" font-size="8">#120  0.753  (Otoro Yes)     #121  0.247  (Otoro No)</text>
+
+  <!-- Phase 2 -->
+  <text x="56" y="1039" fill="#8a8578" font-size="9">$ docker compose restart indexer</text>
+  <text x="310" y="1039" fill="#6b6560" font-size="8">← restart, resumes from cursor 48354111, +16 blocks</text>
+
+  <!-- Result badges -->
+  <rect x="560" y="1052" width="140" height="22" rx="2" fill="rgba(0,255,136,0.04)" stroke="rgba(0,255,136,0.25)" stroke-width="1"/>
+  <circle cx="575" cy="1063" r="3" fill="#00ff88"/>
+  <text x="585" y="1067" fill="#00ff88" font-size="9" letter-spacing="0.05em">7 markets live</text>
+
+  <rect x="710" y="1052" width="140" height="22" rx="2" fill="rgba(0,255,136,0.04)" stroke="rgba(0,255,136,0.25)" stroke-width="1"/>
+  <circle cx="725" cy="1063" r="3" fill="#00ff88"/>
+  <text x="735" y="1067" fill="#00ff88" font-size="9" letter-spacing="0.05em">14 prices/poll</text>
+</svg>
