@@ -489,6 +489,85 @@ impl PostgresStorage {
         Ok(())
     }
 
+    async fn insert_hip4_merkle_claims(pool: &PgPool, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.merkle_claims.is_empty() {
+            return Ok(());
+        }
+
+        let len = data.merkle_claims.len();
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut tx_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut contest_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut side_ids: Vec<i64> = Vec::with_capacity(len);
+        let mut user_addresses: Vec<Vec<u8>> = Vec::with_capacity(len);
+        let mut amounts: Vec<sqlx::types::BigDecimal> = Vec::with_capacity(len);
+        let mut proof_lengths: Vec<i32> = Vec::with_capacity(len);
+
+        for c in &data.merkle_claims {
+            block_numbers.push(c.block_number as i64);
+            tx_indexes.push(c.tx_index as i32);
+            contest_ids.push(c.contest_id as i64);
+            side_ids.push(c.side_id as i64);
+            user_addresses.push(c.user.as_slice().to_vec());
+            let amount: sqlx::types::BigDecimal = c
+                .amount_wei
+                .to_string()
+                .parse()
+                .map_err(|e| eyre::eyre!("Failed to parse amount_wei: {e}"))?;
+            amounts.push(amount);
+            proof_lengths.push(c.proof_length as i32);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_merkle_claims (block_number, tx_index, contest_id, side_id, user_address, amount_wei, proof_length)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::INTEGER[], $3::BIGINT[], $4::BIGINT[], $5::BYTEA[], $6::NUMERIC[], $7::INTEGER[])
+               ON CONFLICT (block_number, tx_index) DO NOTHING"#,
+        )
+        .bind(&block_numbers)
+        .bind(&tx_indexes)
+        .bind(&contest_ids)
+        .bind(&side_ids)
+        .bind(&user_addresses)
+        .bind(&amounts)
+        .bind(&proof_lengths)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_merkle_claims: {e}"))?;
+
+        Ok(())
+    }
+
+    async fn insert_hip4_finalizations(pool: &PgPool, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.finalizations.is_empty() {
+            return Ok(());
+        }
+
+        let len = data.finalizations.len();
+        let mut block_numbers: Vec<i64> = Vec::with_capacity(len);
+        let mut tx_indexes: Vec<i32> = Vec::with_capacity(len);
+        let mut contest_ids: Vec<i64> = Vec::with_capacity(len);
+
+        for f in &data.finalizations {
+            block_numbers.push(f.block_number as i64);
+            tx_indexes.push(f.tx_index as i32);
+            contest_ids.push(f.contest_id as i64);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_finalizations (block_number, tx_index, contest_id)
+               SELECT * FROM UNNEST($1::BIGINT[], $2::INTEGER[], $3::BIGINT[])
+               ON CONFLICT (block_number, tx_index) DO NOTHING"#,
+        )
+        .bind(&block_numbers)
+        .bind(&tx_indexes)
+        .bind(&contest_ids)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to batch insert hip4_finalizations: {e}"))?;
+
+        Ok(())
+    }
+
     /// Batch-upsert HIP4 markets using UNNEST.
     async fn upsert_hip4_markets_pg(pool: &PgPool, markets: &[Hip4Market]) -> eyre::Result<()> {
         if markets.is_empty() {
@@ -502,6 +581,11 @@ impl PostgresStorage {
         let mut side_specs_vec: Vec<String> = Vec::with_capacity(len);
         let mut question_ids: Vec<Option<i32>> = Vec::with_capacity(len);
         let mut question_names: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut desc_classes: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut desc_underlyings: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut desc_expiries: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut desc_target_prices: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut desc_periods: Vec<Option<String>> = Vec::with_capacity(len);
 
         for m in markets {
             outcome_ids.push(m.outcome_id as i32);
@@ -510,18 +594,31 @@ impl PostgresStorage {
             side_specs_vec.push(m.side_specs.clone());
             question_ids.push(m.question_id.map(|v| v as i32));
             question_names.push(m.question_name.clone());
+            desc_classes.push(m.parsed.class.clone());
+            desc_underlyings.push(m.parsed.underlying.clone());
+            desc_expiries.push(m.parsed.expiry.clone());
+            desc_target_prices.push(m.parsed.target_price.clone());
+            desc_periods.push(m.parsed.period.clone());
         }
 
         sqlx::query(
-            r#"INSERT INTO hip4_markets (outcome_id, name, description, side_specs, question_id, question_name, updated_at)
-               SELECT o, n, d, s, q, qn, NOW()
-               FROM UNNEST($1::INTEGER[], $2::TEXT[], $3::TEXT[], $4::TEXT[], $5::INTEGER[], $6::TEXT[]) AS t(o, n, d, s, q, qn)
+            r#"INSERT INTO hip4_markets (outcome_id, name, description, side_specs, question_id, question_name,
+                                         desc_class, desc_underlying, desc_expiry, desc_target_price, desc_period, updated_at)
+               SELECT o, n, d, s, q, qn, dc, du, de, dtp, dp, NOW()
+               FROM UNNEST($1::INTEGER[], $2::TEXT[], $3::TEXT[], $4::TEXT[], $5::INTEGER[], $6::TEXT[],
+                           $7::TEXT[], $8::TEXT[], $9::TEXT[], $10::TEXT[], $11::TEXT[])
+                    AS t(o, n, d, s, q, qn, dc, du, de, dtp, dp)
                ON CONFLICT (outcome_id) DO UPDATE SET
                  name = EXCLUDED.name,
                  description = EXCLUDED.description,
                  side_specs = EXCLUDED.side_specs,
                  question_id = EXCLUDED.question_id,
                  question_name = EXCLUDED.question_name,
+                 desc_class = EXCLUDED.desc_class,
+                 desc_underlying = EXCLUDED.desc_underlying,
+                 desc_expiry = EXCLUDED.desc_expiry,
+                 desc_target_price = EXCLUDED.desc_target_price,
+                 desc_period = EXCLUDED.desc_period,
                  updated_at = NOW()"#,
         )
         .bind(&outcome_ids)
@@ -530,6 +627,11 @@ impl PostgresStorage {
         .bind(&side_specs_vec)
         .bind(&question_ids)
         .bind(&question_names)
+        .bind(&desc_classes)
+        .bind(&desc_underlyings)
+        .bind(&desc_expiries)
+        .bind(&desc_target_prices)
+        .bind(&desc_periods)
         .execute(pool)
         .await
         .map_err(|e| eyre::eyre!("Failed to upsert hip4_markets: {e}"))?;
@@ -680,6 +782,8 @@ impl Storage for PostgresStorage {
         Self::insert_hip4_contest_creations(&self.pool, data).await?;
         Self::insert_hip4_refunds(&self.pool, data).await?;
         Self::insert_hip4_sweeps(&self.pool, data).await?;
+        Self::insert_hip4_merkle_claims(&self.pool, data).await?;
+        Self::insert_hip4_finalizations(&self.pool, data).await?;
         Ok(())
     }
 

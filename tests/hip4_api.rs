@@ -7,7 +7,7 @@
 use hypercore_indexer::hip4::api::{
     outcome_meta_to_markets, parse_all_mids_hip4, parse_outcome_meta, prices_to_rows,
 };
-use hypercore_indexer::hip4::types::{Hip4Market, Hip4PriceRow};
+use hypercore_indexer::hip4::types::{Hip4Market, Hip4PriceRow, ParsedDescription};
 use hypercore_indexer::storage::sqlite::SqliteStorage;
 use hypercore_indexer::storage::Storage;
 
@@ -96,6 +96,7 @@ async fn upsert_markets_updates_on_conflict() {
         side_specs: r#"[{"name":"Yes"},{"name":"No"}]"#.to_string(),
         question_id: Some(1),
         question_name: Some("Q1".to_string()),
+        parsed: ParsedDescription::default(),
     }];
     db.upsert_hip4_markets(&markets_v1).await.unwrap();
 
@@ -107,6 +108,7 @@ async fn upsert_markets_updates_on_conflict() {
         side_specs: r#"[{"name":"Up"},{"name":"Down"}]"#.to_string(),
         question_id: Some(2),
         question_name: Some("Q2".to_string()),
+        parsed: ParsedDescription::default(),
     }];
     db.upsert_hip4_markets(&markets_v2).await.unwrap();
 

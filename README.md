@@ -165,9 +165,15 @@ hypercore-indexer captures both layers:
 |------|--------|-------|
 | Contest deposits | HyperEVM event logs (Deposit event) | `hip4_deposits` |
 | Contest claims/refunds | HyperEVM event logs (Claimed event) | `hip4_claims` |
+| Merkle-proof claims | HyperEVM calldata (claim with proof) | `hip4_merkle_claims` |
+| Contest creations | HyperEVM calldata (createContest) | `hip4_contest_creations` |
+| Contest finalizations | HyperEVM calldata (finalizeContest) | `hip4_finalizations` |
+| Refunds / sweeps | HyperEVM calldata | `hip4_refunds` / `hip4_sweeps` |
 | Market metadata | HyperCore `outcomeMeta` API | `hip4_markets` |
 | Price snapshots | HyperCore `allMids` API (# coins) | `hip4_prices` |
 | Trade fills | S3 `node_fills` / mirrored from `fills` | `hip4_trades` |
+
+Recurring markets (e.g. "BTC > $71k by tomorrow") have their pipe-delimited description automatically parsed into structured fields (`desc_class`, `desc_underlying`, `desc_expiry`, `desc_target_price`, `desc_period`) for direct querying.
 
 **Status**: HIP4 is live on testnet. When it launches on mainnet, change `[network] name = "mainnet"` and update the `contest_address` -- everything else works automatically.
 
@@ -370,10 +376,21 @@ hip4_sweeps                           ← decoded from sweepUnclaimed() calls
 ├── block_number, tx_index (PK)
 └── contest_id
 
+hip4_merkle_claims                    ← decoded from claim() calldata (Merkle proof)
+├── block_number, tx_index (PK)
+├── contest_id, side_id
+├── user_address, amount_wei
+└── proof_length
+
+hip4_finalizations                    ← decoded from finalizeContest() calldata
+├── block_number, tx_index (PK)
+└── contest_id
+
 hip4_markets                          ← polled from outcomeMeta API
 ├── outcome_id (PK)
 ├── name, description, side_specs (JSON)
-└── question_id, question_name
+├── question_id, question_name
+└── desc_class, desc_underlying, desc_expiry, desc_target_price, desc_period
 
 hip4_prices                           ← polled from allMids API
 ├── coin, timestamp (PK)              ← "#90", "#91", "#11760"
@@ -390,6 +407,7 @@ indexer_cursor
 S3 EVM blocks ──→ blocks → transactions → event_logs → system_transfers
                                        └→ hip4_deposits, hip4_claims (decoded)
                                        └→ hip4_contest_creations, hip4_refunds, hip4_sweeps
+                                       └→ hip4_merkle_claims, hip4_finalizations
 
 S3 node_fills ──→ fills ──→ hip4_trades (# coins mirrored)
 

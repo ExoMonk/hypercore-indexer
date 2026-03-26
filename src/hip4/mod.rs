@@ -62,6 +62,8 @@ pub fn process_block(block: &DecodedBlock, config: &Hip4Config) -> Hip4BlockData
                     decoder::Hip4Action::ContestCreated(c) => data.contest_creations.push(c),
                     decoder::Hip4Action::Refund(r) => data.refunds.push(r),
                     decoder::Hip4Action::SweepUnclaimed(s) => data.sweeps.push(s),
+                    decoder::Hip4Action::MerkleClaim(c) => data.merkle_claims.push(c),
+                    decoder::Hip4Action::FinalizeContest(f) => data.finalizations.push(f),
                 }
             }
         }

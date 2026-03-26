@@ -20,6 +20,10 @@ UNION ALL
 SELECT 'event_logs', COUNT(*) FROM event_logs
 UNION ALL
 SELECT 'indexer_cursor', COUNT(*) FROM indexer_cursor
+UNION ALL
+SELECT 'hip4_merkle_claims', COUNT(*) FROM hip4_merkle_claims
+UNION ALL
+SELECT 'hip4_finalizations', COUNT(*) FROM hip4_finalizations
 ORDER BY table_name;
 "
 

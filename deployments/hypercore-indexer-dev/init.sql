@@ -120,6 +120,27 @@ CREATE TABLE IF NOT EXISTS hip4_sweeps (
     PRIMARY KEY (block_number, tx_index)
 );
 
+CREATE TABLE IF NOT EXISTS hip4_merkle_claims (
+    block_number    BIGINT NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      BIGINT NOT NULL,
+    side_id         BIGINT NOT NULL,
+    user_address    BYTEA NOT NULL,
+    amount_wei      NUMERIC NOT NULL,
+    proof_length    INTEGER NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_merkle_claims_contest ON hip4_merkle_claims (contest_id, side_id);
+CREATE INDEX IF NOT EXISTS idx_hip4_merkle_claims_user ON hip4_merkle_claims (user_address);
+
+CREATE TABLE IF NOT EXISTS hip4_finalizations (
+    block_number    BIGINT NOT NULL,
+    tx_index        INTEGER NOT NULL,
+    contest_id      BIGINT NOT NULL,
+    PRIMARY KEY (block_number, tx_index)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_finalizations_contest ON hip4_finalizations (contest_id);
+
 CREATE TABLE IF NOT EXISTS hip4_markets (
     outcome_id      INTEGER NOT NULL,
     name            TEXT NOT NULL,
@@ -127,9 +148,19 @@ CREATE TABLE IF NOT EXISTS hip4_markets (
     side_specs      TEXT NOT NULL,
     question_id     INTEGER,
     question_name   TEXT,
+    desc_class      TEXT,
+    desc_underlying TEXT,
+    desc_expiry     TEXT,
+    desc_target_price TEXT,
+    desc_period     TEXT,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (outcome_id)
 );
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_class TEXT;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_underlying TEXT;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_expiry TEXT;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_target_price TEXT;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_period TEXT;
 
 CREATE TABLE IF NOT EXISTS hip4_prices (
     coin            TEXT NOT NULL,

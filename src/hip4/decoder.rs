@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use tiny_keccak::{Hasher, Keccak};
 
 use crate::decode::types::DecodedLog;
-use super::types::{Hip4Claim, Hip4ContestCreated, Hip4Deposit, Hip4Refund, Hip4SweepUnclaimed};
+use super::types::{Hip4Claim, Hip4ContestCreated, Hip4Deposit, Hip4FinalizeContest, Hip4MerkleClaim, Hip4Refund, Hip4SweepUnclaimed};
 
 /// topic0 for `Deposit(uint256 indexed contestId, uint256 indexed sideId, address depositor, uint256 amount)`
 const DEPOSIT_TOPIC0: B256 = B256::new([
@@ -104,6 +104,8 @@ fn topic_to_u64(topic: &B256) -> Option<u64> {
 const CREATE_CONTEST_SELECTOR: [u8; 4] = [0x6d, 0xab, 0x6b, 0x23];
 const REFUND_SELECTOR: [u8; 4] = [0xa3, 0xd0, 0x7f, 0x67];
 const SWEEP_UNCLAIMED_SELECTOR: [u8; 4] = [0xe5, 0x0e, 0x64, 0xd5];
+const CLAIM_SELECTOR: [u8; 4] = [0x5d, 0x4d, 0xf3, 0xbf];
+const FINALIZE_CONTEST_SELECTOR: [u8; 4] = [0x3a, 0x8e, 0xf0, 0x3b];
 
 /// A decoded contest contract action from transaction input calldata.
 #[derive(Debug)]
@@ -111,6 +113,8 @@ pub enum Hip4Action {
     ContestCreated(Hip4ContestCreated),
     Refund(Hip4Refund),
     SweepUnclaimed(Hip4SweepUnclaimed),
+    MerkleClaim(Hip4MerkleClaim),
+    FinalizeContest(Hip4FinalizeContest),
 }
 
 /// Decode a contest contract function call from transaction input calldata.
@@ -168,6 +172,49 @@ pub fn decode_calldata(input: &[u8], block_number: u64, tx_index: usize) -> Opti
             }
             let contest_id = word_to_u64(&input[4..36])?;
             Some(Hip4Action::SweepUnclaimed(Hip4SweepUnclaimed {
+                block_number,
+                tx_index,
+                contest_id,
+            }))
+        }
+        CLAIM_SELECTOR => {
+            // claim(uint256, uint256, address, uint256, bytes32[])
+            // ABI: selector(4) + contestId(32) + sideId(32) + user(32) + amount(32)
+            //      + offset(32) + arrayLen(32) + proof[](N*32) = min 196 bytes
+            if input.len() < 196 {
+                return None;
+            }
+            let contest_id = word_to_u64(&input[4..36])?;
+            let side_id = word_to_u64(&input[36..68])?;
+            let user = Address::from_slice(&input[80..100]);
+            let amount_wei = U256::from_be_slice(&input[100..132]);
+            // Validate proof offset is 0xa0 (160) — the only valid value for this signature
+            let proof_offset = word_to_u64(&input[132..164])?;
+            if proof_offset != 160 {
+                return None;
+            }
+            let proof_length = u32::try_from(word_to_u64(&input[164..196])?).ok()?;
+            let proof_bytes = (proof_length as usize).checked_mul(32)?;
+            if input.len() < 196 + proof_bytes {
+                return None;
+            }
+            Some(Hip4Action::MerkleClaim(Hip4MerkleClaim {
+                block_number,
+                tx_index,
+                contest_id,
+                side_id,
+                user,
+                amount_wei,
+                proof_length,
+            }))
+        }
+        FINALIZE_CONTEST_SELECTOR => {
+            // finalizeContest(uint256) — 4 + 32 = 36 bytes
+            if input.len() < 36 {
+                return None;
+            }
+            let contest_id = word_to_u64(&input[4..36])?;
+            Some(Hip4Action::FinalizeContest(Hip4FinalizeContest {
                 block_number,
                 tx_index,
                 contest_id,
@@ -419,6 +466,141 @@ mod tests {
         // sweepUnclaimed needs 36 bytes, give it 35
         let mut input = vec![0u8; 35];
         input[0..4].copy_from_slice(&SWEEP_UNCLAIMED_SELECTOR);
+        assert!(decode_calldata(&input, 1, 0).is_none());
+    }
+
+    // --- New V2 decoder tests ---
+
+    #[test]
+    fn claim_selector_matches_signature() {
+        let hash = keccak256(b"claim(uint256,uint256,address,uint256,bytes32[])");
+        assert_eq!(&hash.as_slice()[..4], &CLAIM_SELECTOR);
+    }
+
+    #[test]
+    fn finalize_contest_selector_matches_signature() {
+        let hash = keccak256(b"finalizeContest(uint256)");
+        assert_eq!(&hash.as_slice()[..4], &FINALIZE_CONTEST_SELECTOR);
+    }
+
+    /// Build valid claim calldata with N proof elements.
+    fn build_claim_calldata(contest_id: u64, side_id: u64, user: &Address, amount: U256, proof_count: u32) -> Vec<u8> {
+        let contest_word = u64_to_word(contest_id);
+        let side_word = u64_to_word(side_id);
+        let user_word = address_to_word(user);
+        let mut amount_word = [0u8; 32];
+        amount_word.copy_from_slice(&amount.to_be_bytes::<32>());
+        let offset_word = u64_to_word(160); // 0xa0
+        let length_word = u64_to_word(proof_count as u64);
+
+        let mut data = Vec::with_capacity(196 + proof_count as usize * 32);
+        data.extend_from_slice(&CLAIM_SELECTOR);
+        data.extend_from_slice(&contest_word);
+        data.extend_from_slice(&side_word);
+        data.extend_from_slice(&user_word);
+        data.extend_from_slice(&amount_word);
+        data.extend_from_slice(&offset_word);
+        data.extend_from_slice(&length_word);
+        // Add dummy proof elements
+        for i in 0..proof_count {
+            let mut proof = [0u8; 32];
+            proof[31] = i as u8;
+            data.extend_from_slice(&proof);
+        }
+        data
+    }
+
+    #[test]
+    fn decode_claim_zero_proofs() {
+        let user: Address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".parse().unwrap();
+        let amount = U256::from(1_000_000_000_000_000_000u128);
+        let input = build_claim_calldata(42, 1, &user, amount, 0);
+        assert_eq!(input.len(), 196);
+
+        let action = decode_calldata(&input, 100, 5).unwrap();
+        match action {
+            Hip4Action::MerkleClaim(c) => {
+                assert_eq!(c.block_number, 100);
+                assert_eq!(c.tx_index, 5);
+                assert_eq!(c.contest_id, 42);
+                assert_eq!(c.side_id, 1);
+                assert_eq!(c.user, user);
+                assert_eq!(c.amount_wei, amount);
+                assert_eq!(c.proof_length, 0);
+            }
+            _ => panic!("expected MerkleClaim"),
+        }
+    }
+
+    #[test]
+    fn decode_claim_with_proofs() {
+        let user: Address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap();
+        let amount = U256::from(500_000u64);
+        let input = build_claim_calldata(99, 2, &user, amount, 3);
+        assert_eq!(input.len(), 196 + 3 * 32);
+
+        let action = decode_calldata(&input, 200, 3).unwrap();
+        match action {
+            Hip4Action::MerkleClaim(c) => {
+                assert_eq!(c.contest_id, 99);
+                assert_eq!(c.side_id, 2);
+                assert_eq!(c.user, user);
+                assert_eq!(c.amount_wei, amount);
+                assert_eq!(c.proof_length, 3);
+            }
+            _ => panic!("expected MerkleClaim"),
+        }
+    }
+
+    #[test]
+    fn decode_claim_short_calldata_returns_none() {
+        // Less than 196 bytes
+        let mut input = vec![0u8; 195];
+        input[0..4].copy_from_slice(&CLAIM_SELECTOR);
+        assert!(decode_calldata(&input, 1, 0).is_none());
+    }
+
+    #[test]
+    fn decode_claim_wrong_offset_returns_none() {
+        let user: Address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".parse().unwrap();
+        let amount = U256::from(100u64);
+        let mut input = build_claim_calldata(1, 1, &user, amount, 0);
+        // Corrupt the offset word — set to 192 instead of 160
+        let bad_offset = u64_to_word(192);
+        input[136..168].copy_from_slice(&bad_offset);
+        assert!(decode_calldata(&input, 1, 0).is_none());
+    }
+
+    #[test]
+    fn decode_claim_truncated_proof_returns_none() {
+        let user: Address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".parse().unwrap();
+        let amount = U256::from(100u64);
+        let mut input = build_claim_calldata(1, 1, &user, amount, 2);
+        // Truncate: claims 2 proofs but we remove the last one
+        input.truncate(196 + 32); // only 1 proof element, but length says 2
+        assert!(decode_calldata(&input, 1, 0).is_none());
+    }
+
+    #[test]
+    fn decode_finalize_contest_calldata() {
+        let contest_id_word = u64_to_word(42);
+        let input = build_calldata(&FINALIZE_CONTEST_SELECTOR, &[&contest_id_word]);
+
+        let action = decode_calldata(&input, 300, 7).unwrap();
+        match action {
+            Hip4Action::FinalizeContest(f) => {
+                assert_eq!(f.block_number, 300);
+                assert_eq!(f.tx_index, 7);
+                assert_eq!(f.contest_id, 42);
+            }
+            _ => panic!("expected FinalizeContest"),
+        }
+    }
+
+    #[test]
+    fn decode_finalize_short_calldata_returns_none() {
+        let mut input = vec![0u8; 35];
+        input[0..4].copy_from_slice(&FINALIZE_CONTEST_SELECTOR);
         assert!(decode_calldata(&input, 1, 0).is_none());
     }
 }

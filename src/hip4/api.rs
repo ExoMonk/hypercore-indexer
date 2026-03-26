@@ -143,6 +143,26 @@ pub fn parse_all_mids_hip4(json: &str) -> eyre::Result<Vec<Hip4Price>> {
     Ok(prices)
 }
 
+/// Parse a pipe-delimited market description into structured fields.
+/// Example: `class:priceBinary|underlying:BTC|expiry:20260327-0300|targetPrice:71169|period:1d`
+/// Unknown keys are silently ignored. Descriptions without pipes return all fields as None.
+pub fn parse_description(description: &str) -> super::types::ParsedDescription {
+    let mut parsed = super::types::ParsedDescription::default();
+    for segment in description.split('|') {
+        if let Some((key, value)) = segment.split_once(':') {
+            match key {
+                "class" => parsed.class = Some(value.to_string()),
+                "underlying" => parsed.underlying = Some(value.to_string()),
+                "expiry" => parsed.expiry = Some(value.to_string()),
+                "targetPrice" => parsed.target_price = Some(value.to_string()),
+                "period" => parsed.period = Some(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+    parsed
+}
+
 /// Convert an `OutcomeMetaResponse` into storage-layer `Hip4Market` rows.
 /// Joins outcomes with questions: for each outcome, find the question whose
 /// `named_outcomes` contains this outcome_id.
@@ -158,6 +178,8 @@ pub fn outcome_meta_to_markets(
             let side_specs_json =
                 serde_json::to_string(&o.side_specs).unwrap_or_else(|_| "[]".to_string());
 
+            let parsed = parse_description(&o.description);
+
             super::types::Hip4Market {
                 outcome_id: o.outcome,
                 name: o.name.clone(),
@@ -165,6 +187,7 @@ pub fn outcome_meta_to_markets(
                 side_specs: side_specs_json,
                 question_id: question.map(|q| q.question),
                 question_name: question.map(|q| q.name.clone()),
+                parsed,
             }
         })
         .collect()
@@ -285,5 +308,70 @@ mod tests {
         assert_eq!(rows[0].coin, "#90");
         assert_eq!(rows[0].mid_price, "0.545");
         assert_eq!(rows[0].timestamp_ms, 1700000000000);
+    }
+
+    // --- Description parser tests ---
+
+    #[test]
+    fn parse_description_full() {
+        let desc = "class:priceBinary|underlying:BTC|expiry:20260327-0300|targetPrice:71169|period:1d";
+        let parsed = parse_description(desc);
+        assert_eq!(parsed.class.as_deref(), Some("priceBinary"));
+        assert_eq!(parsed.underlying.as_deref(), Some("BTC"));
+        assert_eq!(parsed.expiry.as_deref(), Some("20260327-0300"));
+        assert_eq!(parsed.target_price.as_deref(), Some("71169"));
+        assert_eq!(parsed.period.as_deref(), Some("1d"));
+    }
+
+    #[test]
+    fn parse_description_partial_keys() {
+        let desc = "class:priceBinary|underlying:ETH";
+        let parsed = parse_description(desc);
+        assert_eq!(parsed.class.as_deref(), Some("priceBinary"));
+        assert_eq!(parsed.underlying.as_deref(), Some("ETH"));
+        assert!(parsed.expiry.is_none());
+        assert!(parsed.target_price.is_none());
+        assert!(parsed.period.is_none());
+    }
+
+    #[test]
+    fn parse_description_empty_string() {
+        let parsed = parse_description("");
+        assert_eq!(parsed, super::super::types::ParsedDescription::default());
+    }
+
+    #[test]
+    fn parse_description_unknown_keys() {
+        let desc = "class:priceBinary|foo:bar|baz:qux";
+        let parsed = parse_description(desc);
+        assert_eq!(parsed.class.as_deref(), Some("priceBinary"));
+        assert!(parsed.underlying.is_none());
+    }
+
+    #[test]
+    fn parse_description_multiple_colons() {
+        let desc = "class:priceBinary|expiry:20260327-0300:extra";
+        let parsed = parse_description(desc);
+        assert_eq!(parsed.expiry.as_deref(), Some("20260327-0300:extra"));
+    }
+
+    #[test]
+    fn parse_description_no_pipes() {
+        let desc = "Just a plain description with no structure";
+        let parsed = parse_description(desc);
+        // No pipes means no key:value segments
+        assert!(parsed.class.is_none());
+        assert!(parsed.underlying.is_none());
+    }
+
+    #[test]
+    fn outcome_meta_to_markets_parses_description() {
+        let resp = parse_outcome_meta(OUTCOME_META_JSON).unwrap();
+        let markets = outcome_meta_to_markets(&resp);
+        // "class:priceBinary|underlying:BTC|expiry:2025-06-30"
+        let m0 = &markets[0];
+        assert_eq!(m0.parsed.class.as_deref(), Some("priceBinary"));
+        assert_eq!(m0.parsed.underlying.as_deref(), Some("BTC"));
+        assert_eq!(m0.parsed.expiry.as_deref(), Some("2025-06-30"));
     }
 }

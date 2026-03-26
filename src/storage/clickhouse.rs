@@ -101,6 +101,22 @@ const SCHEMA_SQL: &[&str] = &[
         contest_id      UInt64
     ) ENGINE = ReplacingMergeTree()
     ORDER BY (block_number, tx_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_merkle_claims (
+        block_number    UInt64,
+        tx_index        UInt32,
+        contest_id      UInt64,
+        side_id         UInt64,
+        user_address    String,
+        amount_wei      String,
+        proof_length    UInt32
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (block_number, tx_index)",
+    "CREATE TABLE IF NOT EXISTS hip4_finalizations (
+        block_number    UInt64,
+        tx_index        UInt32,
+        contest_id      UInt64
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (block_number, tx_index)",
     "CREATE TABLE IF NOT EXISTS hip4_markets (
         outcome_id      UInt32,
         name            String,
@@ -108,6 +124,11 @@ const SCHEMA_SQL: &[&str] = &[
         side_specs      String,
         question_id     Nullable(UInt32),
         question_name   Nullable(String),
+        desc_class      Nullable(String),
+        desc_underlying Nullable(String),
+        desc_expiry     Nullable(String),
+        desc_target_price Nullable(String),
+        desc_period     Nullable(String),
         updated_at      DateTime DEFAULT now()
     ) ENGINE = ReplacingMergeTree(updated_at)
     ORDER BY outcome_id",
@@ -268,6 +289,24 @@ struct Hip4SweepRow {
 }
 
 #[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4MerkleClaimRow {
+    block_number: u64,
+    tx_index: u32,
+    contest_id: u64,
+    side_id: u64,
+    user_address: String,
+    amount_wei: String,
+    proof_length: u32,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4FinalizationRow {
+    block_number: u64,
+    tx_index: u32,
+    contest_id: u64,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
 struct Hip4MarketRow {
     outcome_id: u32,
     name: String,
@@ -275,6 +314,11 @@ struct Hip4MarketRow {
     side_specs: String,
     question_id: Option<u32>,
     question_name: Option<String>,
+    desc_class: Option<String>,
+    desc_underlying: Option<String>,
+    desc_expiry: Option<String>,
+    desc_target_price: Option<String>,
+    desc_period: Option<String>,
 }
 
 #[derive(Debug, Serialize, clickhouse::Row)]
@@ -665,6 +709,68 @@ impl ClickHouseStorage {
         Ok(())
     }
 
+    async fn insert_hip4_merkle_claims_ch(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.merkle_claims.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4MerkleClaimRow>("hip4_merkle_claims")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_merkle_claims inserter: {e}"))?;
+
+        for c in &data.merkle_claims {
+            insert
+                .write(&Hip4MerkleClaimRow {
+                    block_number: c.block_number,
+                    tx_index: c.tx_index as u32,
+                    contest_id: c.contest_id,
+                    side_id: c.side_id,
+                    user_address: to_hex(c.user.as_slice()),
+                    amount_wei: c.amount_wei.to_string(),
+                    proof_length: c.proof_length,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_merkle_claim row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_merkle_claims insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn insert_hip4_finalizations_ch(&self, data: &Hip4BlockData) -> eyre::Result<()> {
+        if data.finalizations.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4FinalizationRow>("hip4_finalizations")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_finalizations inserter: {e}"))?;
+
+        for f in &data.finalizations {
+            insert
+                .write(&Hip4FinalizationRow {
+                    block_number: f.block_number,
+                    tx_index: f.tx_index as u32,
+                    contest_id: f.contest_id,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_finalization row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_finalizations insert: {e}"))?;
+        Ok(())
+    }
+
     async fn upsert_hip4_markets_ch(&self, markets: &[Hip4Market]) -> eyre::Result<()> {
         if markets.is_empty() {
             return Ok(());
@@ -685,6 +791,11 @@ impl ClickHouseStorage {
                     side_specs: m.side_specs.clone(),
                     question_id: m.question_id.map(|v| v as u32),
                     question_name: m.question_name.clone(),
+                    desc_class: m.parsed.class.clone(),
+                    desc_underlying: m.parsed.underlying.clone(),
+                    desc_expiry: m.parsed.expiry.clone(),
+                    desc_target_price: m.parsed.target_price.clone(),
+                    desc_period: m.parsed.period.clone(),
                 })
                 .await
                 .map_err(|e| eyre::eyre!("Failed to write hip4_market row: {e}"))?;
@@ -842,6 +953,8 @@ impl Storage for ClickHouseStorage {
         self.insert_hip4_contest_creations_ch(data).await?;
         self.insert_hip4_refunds_ch(data).await?;
         self.insert_hip4_sweeps_ch(data).await?;
+        self.insert_hip4_merkle_claims_ch(data).await?;
+        self.insert_hip4_finalizations_ch(data).await?;
         Ok(())
     }
 
