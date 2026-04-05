@@ -47,6 +47,28 @@ pub struct Hip4Price {
     pub mid_price: String,
 }
 
+/// Raw spot asset context from the spotMetaAndAssetCtxs API.
+/// Container-level serde(default) ensures missing fields become None, not deserialization failure.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SpotAssetCtx {
+    pub coin: String,
+    #[serde(rename = "prevDayPx")]
+    pub prev_day_px: Option<String>,
+    #[serde(rename = "dayNtlVlm")]
+    pub day_ntl_vlm: Option<String>,
+    #[serde(rename = "markPx")]
+    pub mark_px: Option<String>,
+    #[serde(rename = "midPx")]
+    pub mid_px: Option<String>,
+    #[serde(rename = "circulatingSupply")]
+    pub circulating_supply: Option<String>,
+    #[serde(rename = "dayBaseVlm")]
+    pub day_base_vlm: Option<String>,
+    #[serde(rename = "totalSupply")]
+    pub total_supply: Option<String>,
+}
+
 /// Client for the HyperCore `/info` REST API.
 pub struct HyperCoreApiClient {
     url: String,
@@ -120,6 +142,47 @@ impl HyperCoreApiClient {
 
         Ok(prices)
     }
+
+    /// Fetch spot asset contexts, filtered to `#`-prefixed coins (HIP4 outcomes).
+    /// POST /info with `{"type":"spotMetaAndAssetCtxs"}`
+    /// Response is a JSON array [meta, contexts]. We parse contexts (element [1])
+    /// with per-element try-deserialize to skip heterogeneous entries.
+    pub async fn spot_meta_and_asset_ctxs_hip4(&self) -> eyre::Result<Vec<SpotAssetCtx>> {
+        let body = serde_json::json!({"type": "spotMetaAndAssetCtxs"});
+        let resp = self
+            .client
+            .post(&self.url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| eyre::eyre!("spotMetaAndAssetCtxs request failed: {e}"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(eyre::eyre!(
+                "spotMetaAndAssetCtxs returned HTTP {status}: {text}"
+            ));
+        }
+
+        let raw: Vec<serde_json::Value> = resp
+            .json()
+            .await
+            .map_err(|e| eyre::eyre!("spotMetaAndAssetCtxs JSON parse failed: {e}"))?;
+
+        let ctxs_array = raw
+            .get(1)
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| eyre::eyre!("spotMetaAndAssetCtxs: expected array at index 1"))?;
+
+        let ctxs: Vec<SpotAssetCtx> = ctxs_array
+            .iter()
+            .filter_map(|v| serde_json::from_value::<SpotAssetCtx>(v.clone()).ok())
+            .filter(|c| c.coin.starts_with('#'))
+            .collect();
+
+        Ok(ctxs)
+    }
 }
 
 /// Parse an `OutcomeMetaResponse` from raw JSON (for testing or offline use).
@@ -141,6 +204,26 @@ pub fn parse_all_mids_hip4(json: &str) -> eyre::Result<Vec<Hip4Price>> {
         .collect();
 
     Ok(prices)
+}
+
+/// Parse spotMetaAndAssetCtxs JSON and filter for `#`-prefixed coins.
+#[allow(dead_code)]
+pub fn parse_spot_meta_and_asset_ctxs_hip4(json: &str) -> eyre::Result<Vec<SpotAssetCtx>> {
+    let raw: Vec<serde_json::Value> =
+        serde_json::from_str(json).map_err(|e| eyre::eyre!("Failed to parse spotCtxs JSON: {e}"))?;
+
+    let ctxs_array = raw
+        .get(1)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| eyre::eyre!("spotMetaAndAssetCtxs: expected array at index 1"))?;
+
+    let ctxs: Vec<SpotAssetCtx> = ctxs_array
+        .iter()
+        .filter_map(|v| serde_json::from_value::<SpotAssetCtx>(v.clone()).ok())
+        .filter(|c| c.coin.starts_with('#'))
+        .collect();
+
+    Ok(ctxs)
 }
 
 /// Parse a pipe-delimited market description into structured fields.
@@ -180,6 +263,13 @@ pub fn outcome_meta_to_markets(
 
             let parsed = parse_description(&o.description);
 
+            let market_type = match parsed.class.as_deref() {
+                None => "custom".to_string(),
+                Some("priceBinary") if parsed.period.is_some() => "recurring".to_string(),
+                Some("priceBinary") => "priceBinary".to_string(),
+                Some(other) => other.to_string(),
+            };
+
             super::types::Hip4Market {
                 outcome_id: o.outcome,
                 name: o.name.clone(),
@@ -188,6 +278,13 @@ pub fn outcome_meta_to_markets(
                 question_id: question.map(|q| q.question),
                 question_name: question.map(|q| q.name.clone()),
                 parsed,
+                question_description: question.map(|q| q.description.clone()),
+                settled_named_outcomes: question.map(|q| {
+                    serde_json::to_string(&q.settled_named_outcomes)
+                        .unwrap_or_else(|_| "[]".to_string())
+                }),
+                fallback_outcome: question.and_then(|q| q.fallback_outcome),
+                market_type,
             }
         })
         .collect()
@@ -200,6 +297,26 @@ pub fn prices_to_rows(prices: &[Hip4Price], timestamp_ms: i64) -> Vec<Hip4PriceR
         .map(|p| Hip4PriceRow {
             coin: p.coin.clone(),
             mid_price: p.mid_price.clone(),
+            timestamp_ms,
+        })
+        .collect()
+}
+
+/// Convert `SpotAssetCtx` list into storage-layer `Hip4MarketSnapshotRow` rows.
+pub fn spot_ctxs_to_rows(
+    ctxs: &[SpotAssetCtx],
+    timestamp_ms: i64,
+) -> Vec<super::types::Hip4MarketSnapshotRow> {
+    ctxs.iter()
+        .map(|c| super::types::Hip4MarketSnapshotRow {
+            coin: c.coin.clone(),
+            mark_px: c.mark_px.clone(),
+            mid_px: c.mid_px.clone(),
+            prev_day_px: c.prev_day_px.clone(),
+            day_ntl_vlm: c.day_ntl_vlm.clone(),
+            day_base_vlm: c.day_base_vlm.clone(),
+            circulating_supply: c.circulating_supply.clone(),
+            total_supply: c.total_supply.clone(),
             timestamp_ms,
         })
         .collect()
@@ -373,5 +490,130 @@ mod tests {
         assert_eq!(m0.parsed.class.as_deref(), Some("priceBinary"));
         assert_eq!(m0.parsed.underlying.as_deref(), Some("BTC"));
         assert_eq!(m0.parsed.expiry.as_deref(), Some("2025-06-30"));
+    }
+
+    // --- SpotAssetCtx tests ---
+
+    const SPOT_META_JSON: &str = r##"[
+        {"universe": [{"tokens": []}]},
+        [
+            {"coin": "#32130", "prevDayPx": "0.5", "dayNtlVlm": "1234.56", "markPx": "0.6625", "midPx": "0.6625", "circulatingSupply": "100000", "dayBaseVlm": "500", "totalSupply": "200000"},
+            {"coin": "#32131", "prevDayPx": "0.5", "dayNtlVlm": "100.0", "markPx": "0.3375", "midPx": "0.3375", "circulatingSupply": "50000", "dayBaseVlm": "250", "totalSupply": "200000"},
+            {"coin": "ETH", "prevDayPx": "3000", "dayNtlVlm": "999999", "markPx": "3100", "midPx": "3100", "circulatingSupply": "0", "dayBaseVlm": "0", "totalSupply": "0"},
+            {"somethingElse": true, "unexpectedShape": 42}
+        ]
+    ]"##;
+
+    #[test]
+    fn parse_spot_meta_filters_hash_prefix() {
+        let ctxs = parse_spot_meta_and_asset_ctxs_hip4(SPOT_META_JSON).unwrap();
+        assert_eq!(ctxs.len(), 2);
+        assert_eq!(ctxs[0].coin, "#32130");
+        assert_eq!(ctxs[1].coin, "#32131");
+        assert_eq!(ctxs[0].mark_px.as_deref(), Some("0.6625"));
+        assert_eq!(ctxs[0].day_ntl_vlm.as_deref(), Some("1234.56"));
+    }
+
+    #[test]
+    fn parse_spot_meta_skips_heterogeneous() {
+        // The 4th entry in the array has an unexpected shape — should be silently skipped
+        let ctxs = parse_spot_meta_and_asset_ctxs_hip4(SPOT_META_JSON).unwrap();
+        // Only 2 #-prefixed entries (ETH also parsed but filtered out by #-prefix)
+        assert_eq!(ctxs.len(), 2);
+    }
+
+    #[test]
+    fn parse_spot_meta_missing_fields() {
+        let json = r##"[{}, [{"coin": "#100"}]]"##;
+        let ctxs = parse_spot_meta_and_asset_ctxs_hip4(json).unwrap();
+        assert_eq!(ctxs.len(), 1);
+        assert_eq!(ctxs[0].coin, "#100");
+        assert!(ctxs[0].mark_px.is_none());
+        assert!(ctxs[0].total_supply.is_none());
+    }
+
+    #[test]
+    fn spot_ctxs_to_rows_maps_fields() {
+        let ctxs = vec![SpotAssetCtx {
+            coin: "#90".to_string(),
+            mark_px: Some("0.6".to_string()),
+            mid_px: Some("0.6".to_string()),
+            prev_day_px: Some("0.5".to_string()),
+            day_ntl_vlm: Some("100".to_string()),
+            day_base_vlm: Some("50".to_string()),
+            circulating_supply: Some("1000".to_string()),
+            total_supply: Some("2000".to_string()),
+        }];
+        let rows = spot_ctxs_to_rows(&ctxs, 1700000000000);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].coin, "#90");
+        assert_eq!(rows[0].mark_px.as_deref(), Some("0.6"));
+        assert_eq!(rows[0].timestamp_ms, 1700000000000);
+    }
+
+    // --- Market type classification tests ---
+
+    #[test]
+    fn market_type_custom() {
+        let desc = "Just a plain description";
+        let parsed = parse_description(desc);
+        let mt = match parsed.class.as_deref() {
+            None => "custom",
+            Some("priceBinary") if parsed.period.is_some() => "recurring",
+            Some("priceBinary") => "priceBinary",
+            Some(other) => other,
+        };
+        assert_eq!(mt, "custom");
+    }
+
+    #[test]
+    fn market_type_recurring() {
+        let desc = "class:priceBinary|underlying:BTC|period:1d";
+        let parsed = parse_description(desc);
+        let mt = match parsed.class.as_deref() {
+            None => "custom",
+            Some("priceBinary") if parsed.period.is_some() => "recurring",
+            Some("priceBinary") => "priceBinary",
+            Some(other) => other,
+        };
+        assert_eq!(mt, "recurring");
+    }
+
+    #[test]
+    fn market_type_price_binary() {
+        let desc = "class:priceBinary|underlying:BTC|expiry:20260327";
+        let parsed = parse_description(desc);
+        let mt = match parsed.class.as_deref() {
+            None => "custom",
+            Some("priceBinary") if parsed.period.is_some() => "recurring",
+            Some("priceBinary") => "priceBinary",
+            Some(other) => other,
+        };
+        assert_eq!(mt, "priceBinary");
+    }
+
+    #[test]
+    fn market_type_other_class() {
+        let desc = "class:timeBinary|underlying:ETH";
+        let parsed = parse_description(desc);
+        let mt = match parsed.class.as_deref() {
+            None => "custom",
+            Some("priceBinary") if parsed.period.is_some() => "recurring",
+            Some("priceBinary") => "priceBinary",
+            Some(other) => other,
+        };
+        assert_eq!(mt, "timeBinary");
+    }
+
+    #[test]
+    fn outcome_meta_to_markets_enriches_questions() {
+        let resp = parse_outcome_meta(OUTCOME_META_JSON).unwrap();
+        let markets = outcome_meta_to_markets(&resp);
+        let m0 = &markets[0];
+        assert_eq!(m0.question_description.as_deref(), Some("Market predictions for crypto"));
+        assert_eq!(m0.settled_named_outcomes.as_deref(), Some("[]"));
+        assert!(m0.fallback_outcome.is_none());
+        // "class:priceBinary|underlying:BTC|expiry:2025-06-30" — no period, so priceBinary
+        assert_eq!(m0.market_type, "priceBinary");
     }
 }

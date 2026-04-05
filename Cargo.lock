@@ -2083,7 +2083,7 @@ dependencies = [
 
 [[package]]
 name = "hypercore-indexer"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "alloy-primitives",
  "async-trait",

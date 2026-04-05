@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::decode::types::{AssetType, DecodedBlock, TxType};
 use crate::fills::types::FillRecord;
-use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4MarketSnapshotRow, Hip4PriceRow};
 
 use super::Storage;
 
@@ -129,6 +129,10 @@ const SCHEMA_SQL: &[&str] = &[
         desc_expiry     Nullable(String),
         desc_target_price Nullable(String),
         desc_period     Nullable(String),
+        question_description Nullable(String),
+        settled_named_outcomes Nullable(String),
+        fallback_outcome    Nullable(UInt32),
+        market_type         String DEFAULT 'custom',
         updated_at      DateTime DEFAULT now()
     ) ENGINE = ReplacingMergeTree(updated_at)
     ORDER BY outcome_id",
@@ -137,6 +141,19 @@ const SCHEMA_SQL: &[&str] = &[
         mid_price       String,
         timestamp       DateTime64(3),
         _dummy          UInt8 DEFAULT 0
+    ) ENGINE = ReplacingMergeTree()
+    ORDER BY (coin, timestamp)",
+    "CREATE TABLE IF NOT EXISTS hip4_market_snapshots (
+        coin                String,
+        mark_px             String,
+        mid_px              String,
+        prev_day_px         String,
+        day_ntl_vlm         String,
+        day_base_vlm        String,
+        circulating_supply  String,
+        total_supply        String,
+        timestamp           DateTime64(3),
+        _dummy              UInt8 DEFAULT 0
     ) ENGINE = ReplacingMergeTree()
     ORDER BY (coin, timestamp)",
     "CREATE TABLE IF NOT EXISTS fills (
@@ -319,6 +336,10 @@ struct Hip4MarketRow {
     desc_expiry: Option<String>,
     desc_target_price: Option<String>,
     desc_period: Option<String>,
+    question_description: Option<String>,
+    settled_named_outcomes: Option<String>,
+    fallback_outcome: Option<u32>,
+    market_type: String,
 }
 
 #[derive(Debug, Serialize, clickhouse::Row)]
@@ -327,6 +348,21 @@ struct Hip4PriceChRow {
     mid_price: String,
     #[serde(with = "clickhouse::serde::time::datetime64::millis")]
     timestamp: time::OffsetDateTime,
+}
+
+#[derive(Debug, Serialize, clickhouse::Row)]
+struct Hip4MarketSnapshotChRow {
+    coin: String,
+    mark_px: String,
+    mid_px: String,
+    prev_day_px: String,
+    day_ntl_vlm: String,
+    day_base_vlm: String,
+    circulating_supply: String,
+    total_supply: String,
+    #[serde(with = "clickhouse::serde::time::datetime64::millis")]
+    timestamp: time::OffsetDateTime,
+    _dummy: u8,
 }
 
 #[derive(Debug, Serialize, clickhouse::Row)]
@@ -796,6 +832,10 @@ impl ClickHouseStorage {
                     desc_expiry: m.parsed.expiry.clone(),
                     desc_target_price: m.parsed.target_price.clone(),
                     desc_period: m.parsed.period.clone(),
+                    question_description: m.question_description.clone(),
+                    settled_named_outcomes: m.settled_named_outcomes.clone(),
+                    fallback_outcome: m.fallback_outcome.map(|v| v as u32),
+                    market_type: m.market_type.clone(),
                 })
                 .await
                 .map_err(|e| eyre::eyre!("Failed to write hip4_market row: {e}"))?;
@@ -837,6 +877,50 @@ impl ClickHouseStorage {
             .end()
             .await
             .map_err(|e| eyre::eyre!("Failed to flush hip4_prices insert: {e}"))?;
+        Ok(())
+    }
+
+    async fn insert_hip4_market_snapshots_ch(
+        &self,
+        snapshots: &[Hip4MarketSnapshotRow],
+    ) -> eyre::Result<()> {
+        if snapshots.is_empty() {
+            return Ok(());
+        }
+
+        let mut insert = self
+            .client
+            .insert::<Hip4MarketSnapshotChRow>("hip4_market_snapshots")
+            .await
+            .map_err(|e| eyre::eyre!("Failed to create hip4_market_snapshots inserter: {e}"))?;
+
+        for s in snapshots {
+            let ts = time::OffsetDateTime::from_unix_timestamp_nanos(
+                s.timestamp_ms as i128 * 1_000_000,
+            )
+            .map_err(|e| eyre::eyre!("Invalid timestamp_ms {}: {e}", s.timestamp_ms))?;
+
+            insert
+                .write(&Hip4MarketSnapshotChRow {
+                    coin: s.coin.clone(),
+                    mark_px: s.mark_px.clone().unwrap_or_default(),
+                    mid_px: s.mid_px.clone().unwrap_or_default(),
+                    prev_day_px: s.prev_day_px.clone().unwrap_or_default(),
+                    day_ntl_vlm: s.day_ntl_vlm.clone().unwrap_or_default(),
+                    day_base_vlm: s.day_base_vlm.clone().unwrap_or_default(),
+                    circulating_supply: s.circulating_supply.clone().unwrap_or_default(),
+                    total_supply: s.total_supply.clone().unwrap_or_default(),
+                    timestamp: ts,
+                    _dummy: 0,
+                })
+                .await
+                .map_err(|e| eyre::eyre!("Failed to write hip4_market_snapshot row: {e}"))?;
+        }
+
+        insert
+            .end()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to flush hip4_market_snapshots insert: {e}"))?;
         Ok(())
     }
 
@@ -964,6 +1048,13 @@ impl Storage for ClickHouseStorage {
 
     async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
         self.insert_hip4_prices_ch(prices).await
+    }
+
+    async fn insert_hip4_market_snapshots(
+        &self,
+        snapshots: &[Hip4MarketSnapshotRow],
+    ) -> eyre::Result<()> {
+        self.insert_hip4_market_snapshots_ch(snapshots).await
     }
 
     async fn insert_fills(&self, fills: &[FillRecord]) -> eyre::Result<()> {

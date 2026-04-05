@@ -24,6 +24,12 @@ UNION ALL
 SELECT 'hip4_merkle_claims', COUNT(*) FROM hip4_merkle_claims
 UNION ALL
 SELECT 'hip4_finalizations', COUNT(*) FROM hip4_finalizations
+UNION ALL
+SELECT 'hip4_markets', COUNT(*) FROM hip4_markets
+UNION ALL
+SELECT 'hip4_prices', COUNT(*) FROM hip4_prices
+UNION ALL
+SELECT 'hip4_market_snapshots', COUNT(*) FROM hip4_market_snapshots
 ORDER BY table_name;
 "
 

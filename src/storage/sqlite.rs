@@ -5,7 +5,7 @@ use tracing::info;
 
 use crate::decode::types::{DecodedBlock, DecodedTx};
 use crate::fills::types::FillRecord;
-use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4MarketSnapshotRow, Hip4PriceRow};
 
 use super::postgres::{asset_type_to_db, tx_type_to_smallint};
 use super::Storage;
@@ -166,6 +166,10 @@ CREATE TABLE IF NOT EXISTS hip4_markets (
     desc_expiry     TEXT,
     desc_target_price TEXT,
     desc_period     TEXT,
+    question_description TEXT,
+    settled_named_outcomes TEXT,
+    fallback_outcome INTEGER,
+    market_type TEXT NOT NULL DEFAULT 'custom',
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -176,6 +180,19 @@ CREATE TABLE IF NOT EXISTS hip4_prices (
     PRIMARY KEY (coin, timestamp)
 );
 CREATE INDEX IF NOT EXISTS idx_hip4_prices_time ON hip4_prices (timestamp);
+
+CREATE TABLE IF NOT EXISTS hip4_market_snapshots (
+    coin            TEXT NOT NULL,
+    mark_px         TEXT,
+    mid_px          TEXT,
+    prev_day_px     TEXT,
+    day_ntl_vlm     TEXT,
+    day_base_vlm    TEXT,
+    circulating_supply TEXT,
+    total_supply    TEXT,
+    timestamp       TEXT NOT NULL,
+    PRIMARY KEY (coin, timestamp)
+);
 
 CREATE TABLE IF NOT EXISTS fills (
     trade_id        INTEGER NOT NULL,
@@ -546,8 +563,10 @@ impl SqliteStorage {
         for m in markets {
             sqlx::query(
                 r#"INSERT INTO hip4_markets (outcome_id, name, description, side_specs, question_id, question_name,
-                                             desc_class, desc_underlying, desc_expiry, desc_target_price, desc_period, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                                             desc_class, desc_underlying, desc_expiry, desc_target_price, desc_period,
+                                             question_description, settled_named_outcomes, fallback_outcome, market_type,
+                                             updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                    ON CONFLICT (outcome_id) DO UPDATE SET
                      name = excluded.name,
                      description = excluded.description,
@@ -559,6 +578,10 @@ impl SqliteStorage {
                      desc_expiry = excluded.desc_expiry,
                      desc_target_price = excluded.desc_target_price,
                      desc_period = excluded.desc_period,
+                     question_description = excluded.question_description,
+                     settled_named_outcomes = excluded.settled_named_outcomes,
+                     fallback_outcome = excluded.fallback_outcome,
+                     market_type = excluded.market_type,
                      updated_at = datetime('now')"#,
             )
             .bind(m.outcome_id as i64)
@@ -572,6 +595,10 @@ impl SqliteStorage {
             .bind(&m.parsed.expiry)
             .bind(&m.parsed.target_price)
             .bind(&m.parsed.period)
+            .bind(&m.question_description)
+            .bind(&m.settled_named_outcomes)
+            .bind(m.fallback_outcome.map(|v| v as i64))
+            .bind(&m.market_type)
             .execute(&mut *tx)
             .await
             .map_err(|e| eyre::eyre!("Failed to upsert hip4_market {}: {e}", m.outcome_id))?;
@@ -616,6 +643,49 @@ impl SqliteStorage {
         tx.commit()
             .await
             .map_err(|e| eyre::eyre!("Failed to commit hip4_prices transaction: {e}"))?;
+
+        Ok(())
+    }
+
+    async fn insert_hip4_market_snapshots_sqlite(
+        pool: &SqlitePool,
+        snapshots: &[Hip4MarketSnapshotRow],
+    ) -> eyre::Result<()> {
+        if snapshots.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to begin transaction: {e}"))?;
+
+        for s in snapshots {
+            let ts_secs = s.timestamp_ms / 1000;
+            let ts_str = format!("{ts_secs}");
+            sqlx::query(
+                r#"INSERT OR IGNORE INTO hip4_market_snapshots
+                   (coin, mark_px, mid_px, prev_day_px, day_ntl_vlm, day_base_vlm,
+                    circulating_supply, total_supply, timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))"#,
+            )
+            .bind(&s.coin)
+            .bind(&s.mark_px)
+            .bind(&s.mid_px)
+            .bind(&s.prev_day_px)
+            .bind(&s.day_ntl_vlm)
+            .bind(&s.day_base_vlm)
+            .bind(&s.circulating_supply)
+            .bind(&s.total_supply)
+            .bind(&ts_str)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to insert hip4_market_snapshot {}: {e}", s.coin))?;
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| eyre::eyre!("Failed to commit hip4_market_snapshots transaction: {e}"))?;
 
         Ok(())
     }
@@ -758,6 +828,13 @@ impl Storage for SqliteStorage {
 
     async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
         Self::insert_hip4_prices_sqlite(&self.pool, prices).await
+    }
+
+    async fn insert_hip4_market_snapshots(
+        &self,
+        snapshots: &[Hip4MarketSnapshotRow],
+    ) -> eyre::Result<()> {
+        Self::insert_hip4_market_snapshots_sqlite(&self.pool, snapshots).await
     }
 
     async fn insert_fills(&self, fills: &[FillRecord]) -> eyre::Result<()> {

@@ -67,6 +67,7 @@ fn hip4_config() -> Hip4Config {
         api_url: None,
         meta_poll_interval_s: None,
         price_poll_interval_s: None,
+        spot_poll_interval_s: None,
     }
 }
 
@@ -444,6 +445,7 @@ async fn hip4_disabled_stores_nothing() {
         api_url: None,
         meta_poll_interval_s: None,
         price_poll_interval_s: None,
+        spot_poll_interval_s: None,
     };
 
     load_all_blocks_into_sqlite(&storage, &disabled_config).await;
@@ -477,6 +479,7 @@ async fn hip4_wrong_contract_address_stores_nothing() {
         api_url: None,
         meta_poll_interval_s: None,
         price_poll_interval_s: None,
+        spot_poll_interval_s: None,
     };
 
     load_all_blocks_into_sqlite(&storage, &wrong_config).await;

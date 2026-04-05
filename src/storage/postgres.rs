@@ -4,7 +4,7 @@ use tracing::info;
 
 use crate::decode::types::{AssetType, DecodedBlock, TxType};
 use crate::fills::types::FillRecord;
-use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4MarketSnapshotRow, Hip4PriceRow};
 
 use super::Storage;
 
@@ -586,6 +586,10 @@ impl PostgresStorage {
         let mut desc_expiries: Vec<Option<String>> = Vec::with_capacity(len);
         let mut desc_target_prices: Vec<Option<String>> = Vec::with_capacity(len);
         let mut desc_periods: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut question_descriptions: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut settled_named_outcomes_vec: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut fallback_outcomes: Vec<Option<i32>> = Vec::with_capacity(len);
+        let mut market_types: Vec<String> = Vec::with_capacity(len);
 
         for m in markets {
             outcome_ids.push(m.outcome_id as i32);
@@ -599,15 +603,22 @@ impl PostgresStorage {
             desc_expiries.push(m.parsed.expiry.clone());
             desc_target_prices.push(m.parsed.target_price.clone());
             desc_periods.push(m.parsed.period.clone());
+            question_descriptions.push(m.question_description.clone());
+            settled_named_outcomes_vec.push(m.settled_named_outcomes.clone());
+            fallback_outcomes.push(m.fallback_outcome.map(|v| v as i32));
+            market_types.push(m.market_type.clone());
         }
 
         sqlx::query(
             r#"INSERT INTO hip4_markets (outcome_id, name, description, side_specs, question_id, question_name,
-                                         desc_class, desc_underlying, desc_expiry, desc_target_price, desc_period, updated_at)
-               SELECT o, n, d, s, q, qn, dc, du, de, dtp, dp, NOW()
+                                         desc_class, desc_underlying, desc_expiry, desc_target_price, desc_period,
+                                         question_description, settled_named_outcomes, fallback_outcome, market_type,
+                                         updated_at)
+               SELECT o, n, d, s, q, qn, dc, du, de, dtp, dp, qd, sno, fo, mt, NOW()
                FROM UNNEST($1::INTEGER[], $2::TEXT[], $3::TEXT[], $4::TEXT[], $5::INTEGER[], $6::TEXT[],
-                           $7::TEXT[], $8::TEXT[], $9::TEXT[], $10::TEXT[], $11::TEXT[])
-                    AS t(o, n, d, s, q, qn, dc, du, de, dtp, dp)
+                           $7::TEXT[], $8::TEXT[], $9::TEXT[], $10::TEXT[], $11::TEXT[],
+                           $12::TEXT[], $13::TEXT[], $14::INTEGER[], $15::TEXT[])
+                    AS t(o, n, d, s, q, qn, dc, du, de, dtp, dp, qd, sno, fo, mt)
                ON CONFLICT (outcome_id) DO UPDATE SET
                  name = EXCLUDED.name,
                  description = EXCLUDED.description,
@@ -619,6 +630,10 @@ impl PostgresStorage {
                  desc_expiry = EXCLUDED.desc_expiry,
                  desc_target_price = EXCLUDED.desc_target_price,
                  desc_period = EXCLUDED.desc_period,
+                 question_description = EXCLUDED.question_description,
+                 settled_named_outcomes = EXCLUDED.settled_named_outcomes,
+                 fallback_outcome = EXCLUDED.fallback_outcome,
+                 market_type = EXCLUDED.market_type,
                  updated_at = NOW()"#,
         )
         .bind(&outcome_ids)
@@ -632,6 +647,10 @@ impl PostgresStorage {
         .bind(&desc_expiries)
         .bind(&desc_target_prices)
         .bind(&desc_periods)
+        .bind(&question_descriptions)
+        .bind(&settled_named_outcomes_vec)
+        .bind(&fallback_outcomes)
+        .bind(&market_types)
         .execute(pool)
         .await
         .map_err(|e| eyre::eyre!("Failed to upsert hip4_markets: {e}"))?;
@@ -673,6 +692,63 @@ impl PostgresStorage {
         .execute(pool)
         .await
         .map_err(|e| eyre::eyre!("Failed to insert hip4_prices: {e}"))?;
+
+        Ok(())
+    }
+
+    /// Batch-insert HIP4 market snapshots using UNNEST.
+    async fn insert_hip4_market_snapshots_pg(
+        pool: &PgPool,
+        snapshots: &[Hip4MarketSnapshotRow],
+    ) -> eyre::Result<()> {
+        if snapshots.is_empty() {
+            return Ok(());
+        }
+
+        let len = snapshots.len();
+        let mut coins: Vec<String> = Vec::with_capacity(len);
+        let mut mark_pxs: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut mid_pxs: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut prev_day_pxs: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut day_ntl_vlms: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut day_base_vlms: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut circulating_supplies: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut total_supplies: Vec<Option<String>> = Vec::with_capacity(len);
+        let mut timestamps: Vec<i64> = Vec::with_capacity(len);
+
+        for s in snapshots {
+            coins.push(s.coin.clone());
+            mark_pxs.push(s.mark_px.clone());
+            mid_pxs.push(s.mid_px.clone());
+            prev_day_pxs.push(s.prev_day_px.clone());
+            day_ntl_vlms.push(s.day_ntl_vlm.clone());
+            day_base_vlms.push(s.day_base_vlm.clone());
+            circulating_supplies.push(s.circulating_supply.clone());
+            total_supplies.push(s.total_supply.clone());
+            timestamps.push(s.timestamp_ms);
+        }
+
+        sqlx::query(
+            r#"INSERT INTO hip4_market_snapshots (coin, mark_px, mid_px, prev_day_px, day_ntl_vlm,
+                                                   day_base_vlm, circulating_supply, total_supply, timestamp)
+               SELECT c, mp, mdp, pdp, dnv, dbv, cs, ts, to_timestamp(t::DOUBLE PRECISION / 1000.0)
+               FROM UNNEST($1::TEXT[], $2::TEXT[], $3::TEXT[], $4::TEXT[], $5::TEXT[],
+                           $6::TEXT[], $7::TEXT[], $8::TEXT[], $9::BIGINT[])
+                    AS t(c, mp, mdp, pdp, dnv, dbv, cs, ts, t)
+               ON CONFLICT (coin, timestamp) DO NOTHING"#,
+        )
+        .bind(&coins)
+        .bind(&mark_pxs)
+        .bind(&mid_pxs)
+        .bind(&prev_day_pxs)
+        .bind(&day_ntl_vlms)
+        .bind(&day_base_vlms)
+        .bind(&circulating_supplies)
+        .bind(&total_supplies)
+        .bind(&timestamps)
+        .execute(pool)
+        .await
+        .map_err(|e| eyre::eyre!("Failed to insert hip4_market_snapshots: {e}"))?;
 
         Ok(())
     }
@@ -793,6 +869,13 @@ impl Storage for PostgresStorage {
 
     async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()> {
         Self::insert_hip4_prices_pg(&self.pool, prices).await
+    }
+
+    async fn insert_hip4_market_snapshots(
+        &self,
+        snapshots: &[Hip4MarketSnapshotRow],
+    ) -> eyre::Result<()> {
+        Self::insert_hip4_market_snapshots_pg(&self.pool, snapshots).await
     }
 
     async fn insert_fills(&self, fills: &[FillRecord]) -> eyre::Result<()> {

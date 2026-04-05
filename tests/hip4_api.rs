@@ -97,6 +97,10 @@ async fn upsert_markets_updates_on_conflict() {
         question_id: Some(1),
         question_name: Some("Q1".to_string()),
         parsed: ParsedDescription::default(),
+        question_description: None,
+        settled_named_outcomes: None,
+        fallback_outcome: None,
+        market_type: "custom".to_string(),
     }];
     db.upsert_hip4_markets(&markets_v1).await.unwrap();
 
@@ -109,6 +113,10 @@ async fn upsert_markets_updates_on_conflict() {
         question_id: Some(2),
         question_name: Some("Q2".to_string()),
         parsed: ParsedDescription::default(),
+        question_description: None,
+        settled_named_outcomes: None,
+        fallback_outcome: None,
+        market_type: "custom".to_string(),
     }];
     db.upsert_hip4_markets(&markets_v2).await.unwrap();
 

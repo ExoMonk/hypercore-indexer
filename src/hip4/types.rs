@@ -109,6 +109,12 @@ pub struct Hip4Market {
     pub question_id: Option<u64>,
     pub question_name: Option<String>,
     pub parsed: ParsedDescription,
+    pub question_description: Option<String>,
+    /// JSON array of settled outcome IDs, e.g. "[90, 91]"
+    pub settled_named_outcomes: Option<String>,
+    pub fallback_outcome: Option<u64>,
+    /// Computed market type: "custom", "priceBinary", "recurring", or pass-through class value
+    pub market_type: String,
 }
 
 /// A price snapshot row for storage.
@@ -116,6 +122,22 @@ pub struct Hip4Market {
 pub struct Hip4PriceRow {
     pub coin: String,
     pub mid_price: String,
+    /// Unix timestamp in milliseconds.
+    pub timestamp_ms: i64,
+}
+
+/// A market snapshot row from the spotMetaAndAssetCtxs API.
+/// Captures volume, supply, and mark price per outcome coin.
+#[derive(Debug, Clone)]
+pub struct Hip4MarketSnapshotRow {
+    pub coin: String,
+    pub mark_px: Option<String>,
+    pub mid_px: Option<String>,
+    pub prev_day_px: Option<String>,
+    pub day_ntl_vlm: Option<String>,
+    pub day_base_vlm: Option<String>,
+    pub circulating_supply: Option<String>,
+    pub total_supply: Option<String>,
     /// Unix timestamp in milliseconds.
     pub timestamp_ms: i64,
 }

@@ -32,6 +32,8 @@ pub struct Hip4Config {
     pub meta_poll_interval_s: Option<u64>,
     /// How often to poll allMids for prices (seconds, default: 5)
     pub price_poll_interval_s: Option<u64>,
+    /// How often to poll spotMetaAndAssetCtxs for market snapshots (seconds, default: 30)
+    pub spot_poll_interval_s: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

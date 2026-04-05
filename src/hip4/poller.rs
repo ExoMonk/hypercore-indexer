@@ -10,9 +10,10 @@ use super::api::{self, HyperCoreApiClient};
 
 /// Run the HIP4 API poller as a background task.
 ///
-/// Spawns two loops:
+/// Spawns three loops:
 /// - outcomeMeta poll every `meta_poll_interval_s` (default 60s)
 /// - allMids poll every `price_poll_interval_s` (default 5s)
+/// - spotMetaAndAssetCtxs poll every `spot_poll_interval_s` (default 30s)
 ///
 /// Gracefully stops when `shutdown` receives `true`.
 /// Never panics on API errors — logs warnings and retries on next interval.
@@ -32,11 +33,13 @@ pub async fn run_hip4_poller(
 
     let meta_interval_s = config.meta_poll_interval_s.unwrap_or(60);
     let price_interval_s = config.price_poll_interval_s.unwrap_or(5);
+    let spot_interval_s = config.spot_poll_interval_s.unwrap_or(30);
 
     info!(
         api_url = %api_url,
         meta_interval_s,
         price_interval_s,
+        spot_interval_s,
         "[HIP4-POLLER] Starting"
     );
 
@@ -48,6 +51,10 @@ pub async fn run_hip4_poller(
 
     let mut shutdown_meta = shutdown.clone();
     let mut shutdown_price = shutdown.clone();
+
+    let api_spot = Arc::clone(&api_client);
+    let storage_spot = Arc::clone(&storage);
+    let mut shutdown_spot = shutdown.clone();
 
     // Spawn meta poller
     let meta_handle = tokio::spawn(async move {
@@ -86,12 +93,29 @@ pub async fn run_hip4_poller(
         }
     });
 
-    // Wait for shutdown signal, then wait for both tasks to complete
+    // Spawn spot meta poller
+    let spot_handle = tokio::spawn(async move {
+        let interval = tokio::time::Duration::from_secs(spot_interval_s);
+        loop {
+            poll_spot_meta(&api_spot, storage_spot.as_ref()).await;
+
+            tokio::select! {
+                _ = tokio::time::sleep(interval) => {}
+                _ = shutdown_spot.changed() => {
+                    if *shutdown_spot.borrow() {
+                        info!("[HIP4-POLLER] Spot poller shutting down");
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    // Wait for shutdown signal, then wait for all tasks to complete
     let _ = shutdown.changed().await;
 
     // Tasks will exit on next iteration when they see the shutdown signal
-    let _ = meta_handle.await;
-    let _ = price_handle.await;
+    let _ = tokio::join!(meta_handle, price_handle, spot_handle);
 
     info!("[HIP4-POLLER] Stopped");
     Ok(())
@@ -147,6 +171,33 @@ async fn poll_all_mids(client: &HyperCoreApiClient, storage: &dyn Storage) {
     }
 }
 
+/// Poll spotMetaAndAssetCtxs and insert market snapshots. Never panics.
+async fn poll_spot_meta(client: &HyperCoreApiClient, storage: &dyn Storage) {
+    match client.spot_meta_and_asset_ctxs_hip4().await {
+        Ok(ref ctxs) => {
+            if ctxs.is_empty() {
+                return;
+            }
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            let rows = api::spot_ctxs_to_rows(ctxs, now_ms);
+            match storage.insert_hip4_market_snapshots(&rows).await {
+                Ok(()) => {
+                    info!(count = rows.len(), "[HIP4-POLLER] Inserted market snapshots");
+                }
+                Err(e) => {
+                    warn!("[HIP4-POLLER] Failed to insert market snapshots: {e}");
+                }
+            }
+        }
+        Err(e) => {
+            warn!("[HIP4-POLLER] spotMetaAndAssetCtxs poll failed: {e}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +210,7 @@ mod tests {
             api_url: None,
             meta_poll_interval_s: None,
             price_poll_interval_s: None,
+            spot_poll_interval_s: None,
         };
 
         // This should return Ok immediately since api_url is None.

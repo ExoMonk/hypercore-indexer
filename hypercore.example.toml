@@ -33,6 +33,7 @@ enabled = false                # enable HIP4 prediction market decoding
 # api_url = "https://api.hyperliquid-testnet.xyz/info"            # HyperCore API for markets + prices
 # meta_poll_interval_s = 60    # how often to poll outcomeMeta (seconds)
 # price_poll_interval_s = 5    # how often to poll allMids for prices (seconds)
+# spot_poll_interval_s = 30   # how often to poll spotMetaAndAssetCtxs for market snapshots (seconds)
 
 [fills]
 enabled = false                # enable trade fills ingestion

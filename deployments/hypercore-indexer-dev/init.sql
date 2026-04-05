@@ -161,6 +161,10 @@ ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_underlying TEXT;
 ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_expiry TEXT;
 ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_target_price TEXT;
 ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS desc_period TEXT;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS question_description TEXT;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS settled_named_outcomes TEXT;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS fallback_outcome INTEGER;
+ALTER TABLE hip4_markets ADD COLUMN IF NOT EXISTS market_type TEXT NOT NULL DEFAULT 'custom';
 
 CREATE TABLE IF NOT EXISTS hip4_prices (
     coin            TEXT NOT NULL,
@@ -169,6 +173,20 @@ CREATE TABLE IF NOT EXISTS hip4_prices (
     PRIMARY KEY (coin, timestamp)
 );
 CREATE INDEX IF NOT EXISTS idx_hip4_prices_time ON hip4_prices (timestamp);
+
+CREATE TABLE IF NOT EXISTS hip4_market_snapshots (
+    coin                TEXT NOT NULL,
+    mark_px             TEXT,
+    mid_px              TEXT,
+    prev_day_px         TEXT,
+    day_ntl_vlm         TEXT,
+    day_base_vlm        TEXT,
+    circulating_supply  TEXT,
+    total_supply        TEXT,
+    timestamp           TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (coin, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_hip4_market_snapshots_time ON hip4_market_snapshots (timestamp);
 
 CREATE TABLE IF NOT EXISTS fills (
     trade_id        BIGINT NOT NULL,

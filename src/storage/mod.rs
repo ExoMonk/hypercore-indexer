@@ -4,7 +4,7 @@ pub mod sqlite;
 
 use crate::decode::types::DecodedBlock;
 use crate::fills::types::FillRecord;
-use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4PriceRow};
+use crate::hip4::types::{Hip4BlockData, Hip4Market, Hip4MarketSnapshotRow, Hip4PriceRow};
 
 #[async_trait::async_trait]
 #[allow(dead_code)]
@@ -39,6 +39,13 @@ pub trait Storage: Send + Sync {
     /// Insert HIP4 price snapshots from the allMids API.
     /// On conflict (coin, timestamp), does nothing (idempotent).
     async fn insert_hip4_prices(&self, prices: &[Hip4PriceRow]) -> eyre::Result<()>;
+
+    /// Insert HIP4 market context snapshots from the spotMetaAndAssetCtxs API.
+    /// On conflict (coin, timestamp), does nothing (idempotent).
+    async fn insert_hip4_market_snapshots(
+        &self,
+        snapshots: &[Hip4MarketSnapshotRow],
+    ) -> eyre::Result<()>;
 
     /// Insert trade fills from node_fills data.
     /// On conflict (trade_id, user_address), does nothing (idempotent).
